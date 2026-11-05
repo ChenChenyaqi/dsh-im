@@ -11,6 +11,8 @@ import { computeHumanTypingDelayMs, waitLineInterval } from './typing-delays.mjs
 import { splitIMessageReplyParts } from './reply-splitting.mjs';
 import { sendOutboundArtifactBytes } from './outbound-artifacts.mjs';
 import { channelLog } from './channel-log.mjs';
+import { CompanionController } from './companion-controller.mjs';
+import { runCompanionCommand } from '../shared/companion-command.mjs';
 
 export { HUMAN_TYPING_DEFAULTS, computeHumanTypingDelayMs } from './typing-delays.mjs';
 export { splitIMessageReplyParts } from './reply-splitting.mjs';
@@ -18,6 +20,8 @@ export { splitIMessageReplyParts } from './reply-splitting.mjs';
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
 
 class IMessageBotClient {
+  /** Optional control surface attached by the runtime (`/companion`). */
+  companion = null;
   #api;
   #signal;
   #typing;
@@ -68,15 +72,18 @@ export class IMessageRuntime {
   #diagnostics;
   #replyTimeoutMs; #pollIntervalMs; #createApi; #createClient; #status = createIMessageRuntimeStatus();
   #api; #client; #bridge; #abortController; #timer; #polling; #stopped = true;
+  #companion = null; #persistBotConfig = null;
   constructor({ config, token, harness, state, contextEnhancement, accessPolicy, logger = console,
     replyTimeoutMs = 600_000, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     createApi = (options) => new MacOSMessagesApi(options),
-    createClient = (api, signal) => new IMessageBotClient(api, signal) }) {
+    createClient = (api, signal) => new IMessageBotClient(api, signal),
+    persistBotConfig = null }) {
     if (!config || !token || !harness || !state) throw new TypeError('IMessageRuntime requires config, token, Harness, and state');
     this.#config = config; this.#token = token; this.#harness = harness; this.#state = state;
     this.#contextEnhancement = contextEnhancement; this.#accessPolicy = accessPolicy; this.#logger = logger; this.#diagnostics = createConnectionDiagnostics({ channel: 'imessage', logger });
     this.#replyTimeoutMs = replyTimeoutMs; this.#pollIntervalMs = pollIntervalMs; this.#createApi = createApi;
     this.#createClient = createClient;
+    this.#persistBotConfig = typeof persistBotConfig === 'function' ? persistBotConfig : null;
   }
   get status() { return structuredClone(this.#status); }
   async sendConnectionTest(text) {
@@ -127,12 +134,81 @@ export class IMessageRuntime {
         contextEnhancement: this.#contextEnhancement, accessPolicy: this.#accessPolicy, status: this.#status,
         logger: this.#logger, replyTimeoutMs: this.#replyTimeoutMs, signal: this.#abortController.signal });
       this.#status.ready = true; this.#status.connectionState = 'connected'; this.#status.lastConnectedAt = Date.now();
+      this.#startCompanion();
       channelLog('runtime', 'connected', { pollIntervalMs: this.#pollIntervalMs });
       this.#schedulePoll(0); return this.status;
     } catch (error) { channelLog('runtime', 'start failed', { error: String(error?.message ?? error).slice(0, 200) }); this.#status.ready = false; this.#status.connectionState = 'failed'; this.#status.error = this.#diagnostics.report(error, { operation: 'connection.restore', reuse: true, botId: this.#config?.botId, automatic: true }).publicError;
       this.#status.lastError = this.#status.error.message; await this.stop(); throw error; }
   }
-  async stop() { this.#stopped = true; clearTimeout(this.#timer); this.#timer = null; this.#abortController?.abort(); await this.#polling?.catch(() => {}); this.#polling = null; this.#bridge = null; this.#client = null; this.#api = null; this.#status.ready = false; }
+  /**
+   * Start the spontaneous reach-out scheduler. It reuses the same Harness and
+   * bot client as ordinary replies, and persists warmth/counters inside the
+   * channel state file under `imessageCompanion`.
+   */
+  #startCompanion() {
+    if (this.#companion) return;
+    const store = this.#state;
+    try {
+      this.#companion = new CompanionController({
+        config: this.#config.companion ?? {},
+        readState: () => store.extensionState?.()?.imessageCompanion ?? null,
+        writeState: (value) => {
+          const live = store.extensionState?.();
+          if (!live) return;
+          live.imessageCompanion = value;
+          store.persist?.();
+        },
+        conversations: () => this.#companionConversations(),
+        ask: (sessionId, prompt) => this.#harness.ask(sessionId, prompt, { timeoutMs: this.#replyTimeoutMs }),
+        deliver: async (target, text) => {
+          if (!this.#client) throw new Error('iMessage bot client is not connected');
+          await this.#client.sendText({ chatGuid: target.chatGuid, address: target.address }, text);
+        },
+        logger: this.#logger,
+      });
+      this.#companion.start();
+      // Expose the control surface on the bot so the bridge can run /companion.
+      if (this.#client) {
+        this.#client.companion = {
+          handle: async (text, { conversationKey } = {}) => {
+            if (conversationKey) this.#companion?.noteUserMessage?.(conversationKey);
+            const before = JSON.stringify(this.#companion?.config ?? null);
+            const reply = await runCompanionCommand(text, this.#companion);
+            const after = JSON.stringify(this.#companion?.config ?? null);
+            // `/companion on|off|quiet|rate|deep|every` changed the rhythm: persist
+            // it so the settings page and a restart see the same values.
+            if (before !== after && this.#persistBotConfig) {
+              await this.#persistBotConfig({ companion: this.#companion.config }).catch((error) => {
+                channelLog('companion', 'config persist failed', { error: String(error?.message ?? error).slice(0, 200) });
+              });
+            }
+            return reply;
+          },
+          status: () => this.#companion?.status() ?? null,
+        };
+      }
+    } catch (error) {
+      channelLog('companion', 'start failed', { error: String(error?.message ?? error).slice(0, 200) });
+      this.#companion = null;
+    }
+  }
+
+  /** Bound chats the scheduler may address, newest binding first. */
+  #companionConversations() {
+    const sessions = this.#state.snapshot?.()?.sessions ?? {};
+    return Object.entries(sessions)
+      .filter(([key, sessionId]) => typeof key === 'string' && key && typeof sessionId === 'string' && sessionId)
+      .map(([conversationKey, sessionId]) => {
+        // direct:iMessage;-;+8613800000000 → chatGuid + address
+        const chatGuid = conversationKey.startsWith('direct:')
+          ? conversationKey.slice('direct:'.length)
+          : conversationKey;
+        const address = chatGuid.split(';-;').at(-1) || null;
+        return { conversationKey, sessionId, chatGuid, address };
+      });
+  }
+
+  async stop() { this.#stopped = true; clearTimeout(this.#timer); this.#timer = null; this.#companion?.stop(); this.#companion = null; this.#abortController?.abort(); await this.#polling?.catch(() => {}); this.#polling = null; this.#bridge = null; this.#client = null; this.#api = null; this.#status.ready = false; }
   #schedulePoll(delay) { if (this.#stopped) return; this.#timer = setTimeout(() => { this.#polling = this.#poll().finally(() => this.#schedulePoll(this.#pollIntervalMs)); }, delay); this.#timer.unref?.(); }
   async #poll() {
     if (!this.#api || !this.#bridge || this.#stopped) return;
@@ -142,7 +218,11 @@ export class IMessageRuntime {
       let accepted = 0;
       for (const raw of messages) {
         const message = normalizeIMessage(raw, { botId: this.#config.platformId });
-        if (message) { await this.#bridge.accept(message); accepted += 1; }
+        if (message) {
+          this.#companion?.noteUserMessage?.(`direct:${message.conversationId}`);
+          await this.#bridge.accept(message);
+          accepted += 1;
+        }
         if (Number.isSafeInteger(raw.rowid)) await this.#state.setCursor(raw.rowid);
       }
       if (messages.length > 0) channelLog('runtime', 'poll', { fetched: messages.length, accepted, cursor: this.#state.cursor() });

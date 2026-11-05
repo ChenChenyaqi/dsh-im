@@ -6,9 +6,9 @@ function defineCatalogCommand(name, description, help, { aliases = [], ...option
   return Object.freeze({
     name,
     description,
-    channels: TEXT_CHANNELS,
     menuVisible: true,
     ...options,
+    channels: Object.freeze([...(options.channels ?? TEXT_CHANNELS)]),
     aliases: Object.freeze(aliases.map((alias) => Object.freeze({
       menuVisible: true,
       ...(typeof alias === 'string' ? { name: alias } : alias),
@@ -108,6 +108,16 @@ export const SHARED_COMMAND_CATALOG = Object.freeze([
   defineCatalogCommand('cancel', '取消当前批次', [
     '/cancel  取消当前批次',
   ], { privateOnly: true }),
+  defineCatalogCommand('companion', '查看或设置主动联系（iMessage）', [
+    '/companion  查看主动联系状态',
+    '/companion on|off  开启或关闭',
+    '/companion now  立刻触发一次',
+    '/companion quiet 23:00-08:00  设置夜间区间',
+    '/companion rate 5/2  每日上限（白天/夜间）',
+    '/companion deep on|off  深夜深静音开关',
+    '/companion reset  重置热情值',
+    '/companion every 45-150 / 180-420  间隔区间（分钟，白天/夜间）',
+  ], { aliases: [{ name: 'cp', menuVisible: false }], channels: ['imessage'] }),
   defineCatalogCommand('status', '检查连接状态', [
     '/status  检查连接状态',
   ]),

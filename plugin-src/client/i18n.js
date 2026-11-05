@@ -1343,6 +1343,42 @@ const EN = Object.freeze({
   '在 Web GUI 中发送的消息会作为一条带前缀的消息转发到本聊天的会话同步目标。': 'A message sent in the Web GUI is forwarded to the Session sync target of this chat, prefixed with the icon.',
   '其他回合（Web 输入、定时提醒、子代理通知等）的模型回答会发送到会话同步目标。': 'Model answers of other turns (Web input, schedule reminders, subagent notices and so on) are sent to the Session sync target.',
   '请求失败': 'The request failed',
+  // Companion (spontaneous reach-out) settings card.
+  '主动联系': 'Spontaneous outreach',
+  '无法读取或保存主动联系设置，请稍后重试。':
+    'Could not load or save the spontaneous outreach settings. Try again later.',
+  '开启后她会自己挑时机找你说话，没什么可说的时候就不打扰。夜间会明显变少，但不会完全没有。':
+    'When on, she picks her own moments to write. If she has nothing to say she stays quiet. Nights are much quieter, but never completely silent.',
+  '启用主动联系': 'Enable spontaneous outreach',
+  '关闭后完全不会主动发消息。': 'When off, she never writes first.',
+  '夜间安排': 'Night schedule',
+  '夜间开始': 'Night starts',
+  '夜间结束': 'Night ends',
+  '深夜完全静音': 'Full silence at night',
+  '该时段内一条都不会发；关闭则保留极小概率。':
+    'No messages at all in that window; turning this off keeps a small chance.',
+  '静音开始': 'Silence starts',
+  '静音结束': 'Silence ends',
+  '频率': 'Frequency',
+  '白天上限': 'Day limit',
+  '夜间上限': 'Night limit',
+  '次/天': 'per day',
+  '白天最短间隔': 'Day min interval',
+  '白天最长间隔': 'Day max interval',
+  '夜间最短间隔': 'Night min interval',
+  '夜间最长间隔': 'Night max interval',
+  '分钟': 'minutes',
+  '更像真人': 'More human',
+  '被冷落时收敛': 'Quieter when ignored',
+  '你连续没回，她会变安静，而不是越刷越多。':
+    'If you stop replying she grows quieter instead of writing more often.',
+  '允许带图': 'Allow images',
+  '合适的时候她会发张图给你。': 'She may send a picture when it fits.',
+  '也可以在聊天里用 /companion 查看状态、临时开关。':
+    'You can also type /companion in the chat to check the status or toggle it temporarily.',
+  '正在读取设置…': 'Loading settings…',
+  '主动联系设置返回了无法识别的响应。':
+    'The spontaneous outreach settings returned an unrecognized response.',
 });
 
 export const en = EN;

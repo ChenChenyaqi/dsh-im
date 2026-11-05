@@ -58,6 +58,8 @@ import {
 } from './harness-question.mjs';
 import { deliverOutboundArtifacts } from './semantic/artifact-delivery.mjs';
 import { prependSpeakerLabel } from './speaker-label.mjs';
+/** Channels that expose `bot.companion` handle this command themselves. */
+const COMPANION_COMMAND = /^\/(?:companion|cp)(?=$|\s)/i;
 import {
   hasReplyReference,
   promptContentForInboundMessage,
@@ -1154,6 +1156,14 @@ export class TextHarnessBridge {
           signal: this.#signal,
         });
         await this.#bot.sendText(target, status.message);
+        return;
+      }
+      // Optional channel control surface (currently the companion scheduler):
+      // a channel that exposes `bot.companion` opts in to `/companion`.
+      if (!hasImages && !hasFiles && COMPANION_COMMAND.test(text)
+        && this.#bot.companion && typeof this.#bot.companion.handle === 'function') {
+        const reply = await this.#bot.companion.handle(text, { conversationKey });
+        if (reply) await this.#bot.sendText(target, reply);
         return;
       }
       const workspaceCommand = !hasImages && !hasFiles

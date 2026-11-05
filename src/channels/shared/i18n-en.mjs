@@ -1,3 +1,4 @@
+import companion from './i18n-en/companion.mjs';
 import imageInput from './i18n-en/image-input.mjs';
 import permission from './i18n-en/permission.mjs';
 import diagnostics from './i18n-en/diagnostics.mjs';
@@ -31,6 +32,7 @@ export const EN = Object.freeze(Object.assign(
   sharedA,
   sharedB,
   sharedC,
+  companion,
   feishu,
   dingtalk,
   wecom,

@@ -5,6 +5,7 @@
 // Entries are maintained per area in ./i18n-ru/*.mjs and merged here.
 
 import diagnostics from './i18n-ru/diagnostics.mjs';
+import companion from './i18n-ru/companion.mjs';
 import imageInput from './i18n-ru/image-input.mjs';
 import permission from './i18n-ru/permission.mjs';
 import sharedA from './i18n-ru/shared-a.mjs';
@@ -32,6 +33,7 @@ export const RU = Object.freeze(Object.assign(
   sharedA,
   sharedB,
   sharedC,
+  companion,
   feishu,
   dingtalk,
   wecom,

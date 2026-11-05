@@ -203,6 +203,12 @@ export async function createTokenProductionController(ctx, config, internals, de
         ...(credential ? { credential } : {}),
         // A transport that rotates its tokens needs them written back.
         ...(persistTokens ? { onTokensRefreshed: persistTokens } : {}),
+        // A runtime that owns per-bot settings (the iMessage companion block)
+        // writes them back through the same store the settings UI uses.
+        persistBotConfig: async (patch) => {
+          const current = configStore.get(botId) ?? botConfig;
+          await configStore.save({ ...current, ...patch });
+        },
         // The channel decides which transport a mailbox uses; without this the
         // runtime falls back to its own IMAP/SMTP default.
         ...(typeof createTransport === 'function' ? { createTransport } : {}),
@@ -270,6 +276,9 @@ export async function createTokenProductionController(ctx, config, internals, de
       }),
     } : {}),
     ready: supervisor.ready,
+    // Settings pages that edit per-bot rhythm (the iMessage companion block)
+    // need the same store the credentials use.
+    configStore: observedConfigStore,
     async close() {
       await supervisor.close();
       await controller.close();

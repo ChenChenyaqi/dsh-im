@@ -36,6 +36,11 @@ for (const [channel, component] of channels) {
     }));
     const calls = [];
     const rpcCall = async (endpoint, payload) => {
+      // Extra card sections (the iMessage companion panel) own their settings
+      // RPC; this test only constrains the alias path.
+      if (endpoint.startsWith('settings.companion.')) {
+        return { ok: true, value: { enabled: false, dayCap: 5, nightCap: 2 } };
+      }
       if (endpoint !== 'connection.status') {
         calls.push([endpoint, payload]);
         assert.equal(endpoint, 'bot.alias.set');

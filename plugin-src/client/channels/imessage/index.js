@@ -2,6 +2,7 @@ import { ConnectionError } from '../../connection-error.js';
 import * as React from 'react';
 import { IMessageLogoGlyph } from '../../channel-logos.js';
 import { createTokenChannelSettings } from '../shared/token-channel.js';
+import { CompanionSettings } from '../../companion-settings.js';
 import { IMESSAGE_ENDPOINTS, imessageClientApi } from './api.js';
 import { installIMessageStyles } from './styles.js';
 import { h } from '../../i18n.js';
@@ -40,6 +41,9 @@ const channel = createTokenChannelSettings({
   CredentialPanel: PermissionPanel,
   credentialAriaLabel: '配置 macOS Messages 权限', credentialOpenLabel: '配置本机权限',
   credentialNoun: 'macOS Messages 权限', emptyActionLabel: '配置本机权限',
+  // Extra card section: the spontaneous reach-out rhythm (`/companion` edits the
+  // same stored block, so the two surfaces stay in sync).
+  AccountSettings: CompanionSettings,
 });
 
 export const IMessageSettingsTab = channel.SettingsTab;

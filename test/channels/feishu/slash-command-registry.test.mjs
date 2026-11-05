@@ -51,7 +51,8 @@ test('SLASH_COMMAND_MANIFEST has unique plain command names and bilingual descri
 test('Feishu panel covers supported shared primary commands and its repair command', () => {
   const byName = new Map(SLASH_COMMAND_MANIFEST.map((entry) => [entry.command, entry]));
   // Feishu uses the shared history, workspace, model, preset, control and batch handlers.
-  for (const entry of SHARED_COMMAND_CATALOG.filter((item) => item.enabled !== false && item.menuVisible !== false)) {
+  for (const entry of SHARED_COMMAND_CATALOG.filter((item) => item.enabled !== false
+    && item.menuVisible !== false && item.channels.includes('feishu'))) {
     assert.ok(byName.has(entry.name), `Supported /${entry.name} is missing from the Feishu panel`);
   }
   for (const name of ['permission', 'permissionlist']) assert.ok(byName.has(name));

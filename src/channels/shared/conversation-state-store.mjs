@@ -8,7 +8,7 @@ import { dirname } from 'node:path';
  */
 const EXTENSION_KEYS = Object.freeze([
   'emailBindings', 'mailCursor', 'pendingAuth', 'threadIds', 'rootAnchors',
-  'whatsappBotMessageIds',
+  'whatsappBotMessageIds', 'imessageCompanion',
 ]);
 
 const PENDING_MESSAGE_LIMIT = 200;

@@ -1,78 +1,20 @@
+// iMessage runtime assembly: bot client (human-paced segmented replies,
+// outbound artifact delivery) and the polling runtime that feeds the bridge.
+// Reply pacing and splitting live in sibling modules; re-exported here so
+// existing import paths keep working.
+
 import { createConnectionDiagnostics, atConnectionStage } from '../shared/connection-error.mjs';
 import { sendRememberedConnectionTest } from '../shared/connection-test.mjs';
 import { MacOSMessagesApi, normalizeIMessage } from './imessage-api.mjs';
 import { createIMessageBridgeStatus, IMessageHarnessBridge } from './imessage-bridge.mjs';
-import { writeFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { computeHumanTypingDelayMs, waitLineInterval } from './typing-delays.mjs';
+import { splitIMessageReplyParts } from './reply-splitting.mjs';
+import { sendOutboundArtifactBytes } from './outbound-artifacts.mjs';
+
+export { HUMAN_TYPING_DEFAULTS, computeHumanTypingDelayMs } from './typing-delays.mjs';
+export { splitIMessageReplyParts } from './reply-splitting.mjs';
 
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
-
-export const HUMAN_TYPING_DEFAULTS = Object.freeze({
-  firstReplyMinMs: 600,
-  firstReplyMaxMs: 1_800,
-  baseDelayMs: 250,
-  charsPerSecond: 4,
-  minDelayMs: 250,
-  maxDelayMs: 5_000,
-  jitterRatio: 0.25,
-  pasteMinMs: 300,
-  pasteMaxMs: 800,
-});
-
-/**
- * Simulates human typing rhythm: longer replies wait longer, fenced code
- * blocks are treated as pastes with a short flat delay, and every value is
- * jittered and clamped so the pace never looks mechanical.
- */
-export function computeHumanTypingDelayMs(nextText, { isFirst = false, random = Math.random } = {}) {
-  const options = HUMAN_TYPING_DEFAULTS;
-  const rand = (min, max) => min + random() * (max - min);
-  const text = String(nextText ?? '');
-  let base;
-  if (text.trim().startsWith('```')) {
-    base = rand(options.pasteMinMs, options.pasteMaxMs);
-  } else {
-    base = (isFirst ? rand(options.firstReplyMinMs, options.firstReplyMaxMs) : options.baseDelayMs)
-      + (Array.from(text).length / options.charsPerSecond) * 1_000;
-  }
-  const jitter = 1 + rand(-options.jitterRatio, options.jitterRatio);
-  return Math.min(options.maxDelayMs, Math.max(options.minDelayMs, Math.round(base * jitter)));
-}
-
-function waitLineInterval(signal, ms) {
-  return new Promise((resolve, reject) => {
-    if (ms <= 0) { resolve(); return; }
-    const abort = () => { clearTimeout(timer); reject(signal?.reason ?? new Error('iMessage line send aborted')); };
-    if (signal?.aborted) { abort(); return; }
-    const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, ms);
-    signal?.addEventListener('abort', abort, { once: true });
-  });
-}
-
-export function splitIMessageReplyParts(text) {
-  const raw = String(text ?? '');
-  const parts = [];
-  let block = null;
-  for (const line of raw.split('\n')) {
-    if (block) {
-      block.push(line);
-      if (block.length > 1 && line.trim().startsWith('```')) {
-        parts.push(block.join('\n'));
-        block = null;
-      }
-      continue;
-    }
-    if (line.trim().startsWith('```')) {
-      block = [line];
-      continue;
-    }
-    const plain = line.trim();
-    if (plain) parts.push(plain);
-  }
-  if (block) parts.push(block.join('\n'));
-  return parts.length > 0 ? parts : [raw.trim()];
-}
 
 class IMessageBotClient {
   #api;
@@ -103,29 +45,11 @@ class IMessageBotClient {
     }
   }
   sendTyping() { return Promise.resolve(); }
-  // Outbound artifacts arrive as in-memory bytes; stage them to a temporary
-  // file (keeping the original display name) and hand the path to Messages.
-  async #sendArtifactBytes(target, file) {
-    const bytes = Buffer.from(file?.bytes ?? new Uint8Array());
-    if (!bytes.length) throw new TypeError('outbound file bytes are required');
-    const name = basename(String(file?.fileName ?? 'file')) || 'file';
-    const path = join(tmpdir(), `dsh-im-out-${process.pid}-${Date.now()}-${name}`);
-    try {
-      await writeFile(path, bytes);
-      await this.#api.sendFile({
-        chatGuid: target.chatGuid,
-        address: target.address,
-        path,
-      });
-    } finally {
-      await rm(path, { force: true }).catch(() => undefined);
-    }
-  }
   sendFile(target, file) {
-    return this.#sendArtifactBytes(target, file);
+    return sendOutboundArtifactBytes(this.#api, target, file);
   }
   sendImage(target, file) {
-    return this.#sendArtifactBytes(target, file);
+    return sendOutboundArtifactBytes(this.#api, target, file);
   }
 }
 

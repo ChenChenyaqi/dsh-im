@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { cleanString, normalizeChatGuid, normalizeAddress, permissionError, appleScriptString } from './osascript-helpers.mjs';
 import { mergeAttachmentRows } from './imessage-attachments.mjs';
+import { channelLog } from './channel-log.mjs';
 
 export { decodeAttributedBodyText } from './imessage-decode.mjs';
 export { imessageImageSources, mergeAttachmentRows } from './imessage-attachments.mjs';
@@ -50,7 +51,9 @@ export class MacOSMessagesApi {
   async getPermissions() {
     const result = { platform: process.platform, database: 'unknown', automation: 'unknown' };
     if (process.platform !== 'darwin') {
-      return { ...result, database: 'unsupported', automation: 'unsupported' };
+      const unsupported = { ...result, database: 'unsupported', automation: 'unsupported' };
+      channelLog('api', 'permissions', unsupported);
+      return unsupported;
     }
     try {
       await this.#execFile('/usr/bin/sqlite3', ['-json', this.#dbPath, 'SELECT 1 AS ok LIMIT 1;'], this.#execFileOptions);
@@ -66,6 +69,7 @@ export class MacOSMessagesApi {
       result.automation = /not authorized|(-1743)|assistive/i.test(String(error?.stderr ?? error))
         ? 'required' : 'error';
     }
+    channelLog('api', 'permissions', result);
     return result;
   }
 
@@ -99,8 +103,11 @@ export class MacOSMessagesApi {
       ORDER BY m.ROWID ASC LIMIT ${boundedLimit};`;
     try {
       const { stdout } = await this.#execFile('/usr/bin/sqlite3', ['-json', this.#dbPath, query], this.#execFileOptions);
-      return mergeAttachmentRows(decodeRows(stdout));
+      const rows = mergeAttachmentRows(decodeRows(stdout));
+      if (rows.length > 0) channelLog('api', 'listMessages', { rows: rows.length, after: cursor });
+      return rows;
     } catch (error) {
+      channelLog('api', 'listMessages failed', { after: cursor, error: String(error?.stderr ?? error?.message ?? error).slice(0, 200) });
       if (/authorization denied|not authorized|unable to open database/i.test(String(error?.stderr ?? error))) {
         throw permissionError('messages-database-permission-required', '请在系统设置中授予 DeepSeek Harness 完全磁盘访问权限。', error);
       }
@@ -137,9 +144,12 @@ export class MacOSMessagesApi {
       send ${appleScriptString(reply)} to targetBuddy
     end tell`;
     try {
+      const startedAt = Date.now();
       await this.#osascript(script);
+      channelLog('api', 'sendText ok', { to: recipient, chars: reply.length, elapsedMs: Date.now() - startedAt });
       return { sent: true };
     } catch (error) {
+      channelLog('api', 'sendText failed', { to: recipient, chars: reply.length, error: String(error?.stderr ?? error?.message ?? error).slice(0, 200) });
       if (/not authorized|(-1743)|assistive/i.test(String(error?.stderr ?? error))) {
         throw permissionError('messages-automation-permission-required', '请在系统设置中允许 DeepSeek Harness 自动化控制 Messages。', error);
       }
@@ -163,9 +173,12 @@ export class MacOSMessagesApi {
       send POSIX file ${appleScriptString(filePath)} to targetBuddy
     end tell`;
     try {
+      const startedAt = Date.now();
       await this.#osascript(script);
+      channelLog('api', 'sendFile ok', { to: recipient, path: filePath, elapsedMs: Date.now() - startedAt });
       return { sent: true };
     } catch (error) {
+      channelLog('api', 'sendFile failed', { to: recipient, path: filePath, error: String(error?.stderr ?? error?.message ?? error).slice(0, 200) });
       if (/not authorized|(-1743)|assistive/i.test(String(error?.stderr ?? error))) {
         throw permissionError('messages-automation-permission-required', '请在系统设置中允许 DeepSeek Harness 自动化控制 Messages。', error);
       }

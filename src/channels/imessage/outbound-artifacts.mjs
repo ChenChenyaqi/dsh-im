@@ -5,12 +5,14 @@
 import { writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { channelLog } from './channel-log.mjs';
 
 export async function sendOutboundArtifactBytes(api, target, file) {
   const bytes = Buffer.from(file?.bytes ?? new Uint8Array());
   if (!bytes.length) throw new TypeError('outbound file bytes are required');
   const name = basename(String(file?.fileName ?? 'file')) || 'file';
   const path = join(tmpdir(), `dsh-im-out-${process.pid}-${Date.now()}-${name}`);
+  channelLog('outbound', 'stage', { name, bytes: bytes.length, to: target?.address ?? target?.chatGuid });
   try {
     await writeFile(path, bytes);
     await api.sendFile({
@@ -18,6 +20,10 @@ export async function sendOutboundArtifactBytes(api, target, file) {
       address: target.address,
       path,
     });
+    channelLog('outbound', 'sent', { name, bytes: bytes.length });
+  } catch (error) {
+    channelLog('outbound', 'send failed', { name, error: String(error?.message ?? error).slice(0, 200) });
+    throw error;
   } finally {
     await rm(path, { force: true }).catch(() => undefined);
   }

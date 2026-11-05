@@ -194,6 +194,7 @@ export class TextHarnessBridge {
   #thinkingTraces;
   #status;
   #logger;
+  #diagnostics;
   #replyTimeoutMs;
   #signal;
   #keepaliveIntervalMs;
@@ -252,6 +253,7 @@ export class TextHarnessBridge {
     autoSteerSameSender = false,
     autoSteerLimit = 0,
     coalesceWindowMs = 0,
+    diagnostics = null,
   }) {
     if (!descriptor?.key || !descriptor?.label) throw new TypeError('A channel descriptor is required');
     if (!bot || typeof bot.sendText !== 'function') throw new TypeError('A bot client is required');
@@ -265,6 +267,9 @@ export class TextHarnessBridge {
     this.#thinkingTraces = thinkingTraces;
     this.#status = status;
     this.#logger = logger;
+    // Optional channel-supplied observer for on-device tracing; a bridge built
+    // without one behaves exactly as before.
+    this.#diagnostics = typeof diagnostics === 'function' ? diagnostics : null;
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#signal = signal;
     this.#keepaliveIntervalMs = keepaliveIntervalMs;
@@ -318,6 +323,7 @@ export class TextHarnessBridge {
     const senderId = cleanText(normalized.senderId);
     if (!messageId || !senderId || !conversationId || normalized.senderIsBot === true
       || this.#state.hasSeen(messageId) || this.#acceptedMessageIds.has(messageId)) {
+      this.#diagnostics?.('bridge', 'accept skipped', { messageId, hasIds: Boolean(messageId && senderId && conversationId) });
       return Promise.resolve();
     }
     // Preserve the channel trigger boundary. Access policy never turns an
@@ -1013,7 +1019,10 @@ export class TextHarnessBridge {
         ]);
       }
       for (const reply of result?.messages ?? [result?.message]) {
-        if (reply) await this.#bot.sendText(target, reply);
+        if (reply) {
+          this.#diagnostics?.('bridge', 'deliver reply', { chars: String(reply).length, stopped: result?.stopped === true });
+          await this.#bot.sendText(target, reply);
+        }
       }
       this.#status.lastError = null;
     } catch (error) {
@@ -1024,6 +1033,7 @@ export class TextHarnessBridge {
       message.statusReaction?.error();
       this.#status.lastError = error?.message ?? String(error);
       const failure = setLastMessageFailure(this.#status, error);
+      this.#diagnostics?.('bridge', 'turn failed', { ref: failure.referenceId, error: String(error?.message ?? error).slice(0, 200) });
       this.#logger.error?.(
         `[dsh-im:${this.#descriptor.key}] failed to process a command [${failure.referenceId}]:`,
         messageFailureDiagnostic(error, failure),

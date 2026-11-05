@@ -208,6 +208,16 @@ export class IMessageRuntime {
       });
   }
 
+  /** Apply settings saved by the settings page to the running scheduler. */
+  applySettings(settings = {}) {
+    if (settings.companion && this.#companion) {
+      this.#companion.updateConfig(settings.companion);
+      channelLog('companion', 'settings applied from settings page', {
+        enabled: settings.companion.enabled === true,
+      });
+    }
+  }
+
   async stop() { this.#stopped = true; clearTimeout(this.#timer); this.#timer = null; this.#companion?.stop(); this.#companion = null; this.#abortController?.abort(); await this.#polling?.catch(() => {}); this.#polling = null; this.#bridge = null; this.#client = null; this.#api = null; this.#status.ready = false; }
   #schedulePoll(delay) { if (this.#stopped) return; this.#timer = setTimeout(() => { this.#polling = this.#poll().finally(() => this.#schedulePoll(this.#pollIntervalMs)); }, delay); this.#timer.unref?.(); }
   async #poll() {

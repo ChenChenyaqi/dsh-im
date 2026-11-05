@@ -10,10 +10,13 @@ export const inject = ['connection', 'credentials', 'typertGateway'];
  * reaches it through the shared rpcCall bridge, so a separate channel would
  * never be addressed. A missing store simply leaves the endpoints unavailable.
  */
-function companionHandlerFor(configStore) {
+function companionHandlerFor(configStore, controller) {
   if (!configStore) return null;
   try {
-    return createCompanionRpcHandler({ configStore });
+    return createCompanionRpcHandler({
+      configStore,
+      onSaved: (botId, settings) => controller?.applyRuntimeSettings?.(botId, settings),
+    });
   } catch {
     return null;
   }
@@ -25,7 +28,7 @@ export async function apply(ctx, config = {}) {
   const unregisterDelivery = config.deliveryService && production.deliveryAdapter
     ? config.deliveryService.registerAdapter(production.deliveryAdapter) : undefined;
   const disposeRpc = installIMessageRpc(ctx, production.controller, config.rpcAuthority, {
-    companion: companionHandlerFor(production.configStore),
+    companion: companionHandlerFor(production.configStore, production.controller),
   });
   ctx.effect(() => async () => {
     await unregisterDelivery?.(); await production.close();

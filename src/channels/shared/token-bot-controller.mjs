@@ -207,6 +207,18 @@ export class TokenBotController {
     return this.status();
   }
 
+  /**
+   * Hand a channel-specific settings change to the live runtime so it applies
+   * without a restart. Returns false when no runtime is running (the change is
+   * then picked up from the config store on next start).
+   */
+  applyRuntimeSettings(botId, settings) {
+    const runtime = this.#runtimes.get(botId);
+    if (!runtime || typeof runtime.applySettings !== 'function') return false;
+    runtime.applySettings(settings);
+    return true;
+  }
+
   async sendConnectionTest(botId) {
     const config = this.#configStore.get(botId);
     if (!config) throw new Error(`Unknown ${this.#descriptor.label} bot`);

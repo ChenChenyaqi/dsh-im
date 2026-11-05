@@ -33,6 +33,9 @@ function decodeRows(stdout) {
 }
 
 export class MacOSMessagesApi {
+  // getPermissions is polled by the settings page; only report transitions so
+  // the channel log tracks problems instead of repeating the same line.
+  #lastPermissionKey = null;
   #dbPath;
   #execFile;
   #execFileOptions;
@@ -69,7 +72,11 @@ export class MacOSMessagesApi {
       result.automation = /not authorized|(-1743)|assistive/i.test(String(error?.stderr ?? error))
         ? 'required' : 'error';
     }
-    channelLog('api', 'permissions', result);
+    const key = `${result.database}/${result.automation}`;
+    if (key !== this.#lastPermissionKey) {
+      this.#lastPermissionKey = key;
+      channelLog('api', 'permissions', result);
+    }
     return result;
   }
 

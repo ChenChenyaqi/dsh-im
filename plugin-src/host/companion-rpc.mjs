@@ -45,7 +45,7 @@ function viewOf(config) {
  * Build the handler over one bot's config store. `botId` comes from the payload
  * so the settings card of any bot edits its own block.
  */
-export function createCompanionRpcHandler({ configStore }) {
+export function createCompanionRpcHandler({ configStore, onSaved = null }) {
   if (!configStore || typeof configStore.get !== 'function' || typeof configStore.save !== 'function') {
     throw new TypeError('createCompanionRpcHandler requires a config store');
   }
@@ -96,6 +96,11 @@ export function createCompanionRpcHandler({ configStore }) {
     } catch {
       return { ok: false, error: { code: 'companion-unavailable', message: '无法保存主动联系设置，请稍后重试。' } };
     }
+    // Push the saved rhythm into the running scheduler; without this the page
+    // would save successfully but only take effect after a restart.
+    try {
+      onSaved?.(botId, { companion: merged });
+    } catch {}
     return { ok: true, value: viewOf(merged) };
   };
 }

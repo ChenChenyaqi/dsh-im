@@ -130,3 +130,26 @@ test('client aborts before the first delay sends nothing', async () => {
   await assert.rejects(() => aborted.sendText(target, 'x\ny'));
   assert.equal(api.calls.length, 0);
 });
+
+test('sendImage and sendFile stage bytes to a temp file and forward the path', async () => {
+  const sent = [];
+  const api = { sendFile: async (payload) => { sent.push(payload); return { sent: true }; } };
+  const bot = new IMessageBotClient(api, null);
+  await bot.sendImage(target, { bytes: Buffer.from('PNGDATA'), fileName: '../../whale.png' });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].chatGuid, target.chatGuid);
+  assert.equal(sent[0].address, target.address);
+  assert.ok(sent[0].path.includes('whale.png'));
+  assert.ok(!sent[0].path.includes('..'));
+  const { access } = await import('node:fs/promises');
+  await assert.rejects(() => access(sent[0].path));  // temp file cleaned up
+  await bot.sendFile(target, { bytes: Buffer.from('XYZ'), fileName: 'doc.pdf' });
+  assert.equal(sent.length, 2);
+  assert.ok(sent[1].path.endsWith('doc.pdf'));
+});
+
+test('sendImage rejects empty bytes', async () => {
+  const api = { sendFile: async () => ({ sent: true }) };
+  const bot = new IMessageBotClient(api, null);
+  await assert.rejects(() => bot.sendImage(target, {}), /bytes are required/);
+});

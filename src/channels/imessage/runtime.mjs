@@ -2,6 +2,9 @@ import { createConnectionDiagnostics, atConnectionStage } from '../shared/connec
 import { sendRememberedConnectionTest } from '../shared/connection-test.mjs';
 import { MacOSMessagesApi, normalizeIMessage } from './imessage-api.mjs';
 import { createIMessageBridgeStatus, IMessageHarnessBridge } from './imessage-bridge.mjs';
+import { writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
 
@@ -100,6 +103,30 @@ class IMessageBotClient {
     }
   }
   sendTyping() { return Promise.resolve(); }
+  // Outbound artifacts arrive as in-memory bytes; stage them to a temporary
+  // file (keeping the original display name) and hand the path to Messages.
+  async #sendArtifactBytes(target, file) {
+    const bytes = Buffer.from(file?.bytes ?? new Uint8Array());
+    if (!bytes.length) throw new TypeError('outbound file bytes are required');
+    const name = basename(String(file?.fileName ?? 'file')) || 'file';
+    const path = join(tmpdir(), `dsh-im-out-${process.pid}-${Date.now()}-${name}`);
+    try {
+      await writeFile(path, bytes);
+      await this.#api.sendFile({
+        chatGuid: target.chatGuid,
+        address: target.address,
+        path,
+      });
+    } finally {
+      await rm(path, { force: true }).catch(() => undefined);
+    }
+  }
+  sendFile(target, file) {
+    return this.#sendArtifactBytes(target, file);
+  }
+  sendImage(target, file) {
+    return this.#sendArtifactBytes(target, file);
+  }
 }
 
 export { IMessageBotClient };

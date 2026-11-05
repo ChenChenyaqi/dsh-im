@@ -113,6 +113,29 @@ test('sends text through the native Messages AppleScript bridge', async () => {
   assert.ok(scripts[0].includes(`send ${JSON.stringify('hi')}`));
 });
 
+test('sends files through the macOS 26 POSIX file send command', async () => {
+  const scripts = [];
+  const api = new MacOSMessagesApi({
+    execFileImpl: async () => ({ stdout: '' }),
+    osascriptImpl: async (script) => { scripts.push(script); return { stdout: '' }; },
+  });
+  assert.deepEqual(
+    await api.sendFile({ chatGuid: 'any;-;+8613800000000', address: '+8613800000000', path: '/tmp/pic.png' }),
+    { sent: true },
+  );
+  assert.match(scripts[0], /buddy "\+8613800000000"/);
+  assert.ok(scripts[0].includes(`send POSIX file ${JSON.stringify('/tmp/pic.png')} to targetBuddy`));
+});
+
+test('sendFile requires a path and maps automation permission failures', async () => {
+  const api = new MacOSMessagesApi({ osascriptImpl: async () => { throw new Error('osascript: not authorized to send apple events (-1743)'); } });
+  await assert.rejects(() => api.sendFile({ chatGuid: 'any;-;+8613800000000' }), /file path is required/);
+  await assert.rejects(
+    () => api.sendFile({ chatGuid: 'any;-;+8613800000000', path: '/tmp/pic.png' }),
+    (error) => error.code === 'messages-automation-permission-required',
+  );
+});
+
 test('self-chat accepts the owner once, ignores bot echoes and outgoing messages to others', async (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());

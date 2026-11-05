@@ -350,6 +350,32 @@ export class MacOSMessagesApi {
       throw error;
     }
   }
+
+  // macOS 26 (Tahoe) extends the Messages `send` command with a file direct
+  // parameter, so attachments go out through the same automation channel as
+  // text — no clipboard or UI scripting required.
+  async sendFile({ chatGuid, address, path } = {}) {
+    const target = normalizeChatGuid(chatGuid);
+    const recipient = address ? normalizeAddress(address) : target.split(';').at(-1) || target;
+    const filePath = cleanString(path);
+    if (!filePath) throw new TypeError('iMessage file path is required');
+    const script = `tell application "Messages"
+      set serviceList to every service whose service type = iMessage
+      if (count of serviceList) is 0 then error "No iMessage service is available"
+      set targetService to item 1 of serviceList
+      set targetBuddy to buddy ${appleScriptString(recipient)} of targetService
+      send POSIX file ${appleScriptString(filePath)} to targetBuddy
+    end tell`;
+    try {
+      await this.#osascript(script);
+      return { sent: true };
+    } catch (error) {
+      if (/not authorized|(-1743)|assistive/i.test(String(error?.stderr ?? error))) {
+        throw permissionError('messages-automation-permission-required', '请在系统设置中允许 DeepSeek Harness 自动化控制 Messages。', error);
+      }
+      throw error;
+    }
+  }
 }
 
 export { DEFAULT_DB_PATH };

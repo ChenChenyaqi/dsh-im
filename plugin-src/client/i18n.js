@@ -62,6 +62,14 @@ const COMPOSED = Object.freeze({
 
 const EN = Object.freeze({
   ...COMPOSED,
+
+  // Access policy: iMessage identifies a sender by phone number or Apple ID,
+  // and has neither an owner exemption nor group support.
+  'iMessage 发件人号码或 Apple ID': 'iMessage sender number or Apple ID',
+  '例如 +8613800000000，不要填 chat GUID': 'For example +8613800000000; do not enter a chat GUID',
+  '此区域无需配置；保存私聊设置时会同时关闭群聊访问，并停止处理群消息。': 'Nothing to configure here; saving the private-chat settings also closes group access and stops handling group messages.',
+  'iMessage 没有所有者豁免：你自己也要出现在这个名单里，否则你发的消息同样不会得到回复。': 'iMessage has no owner exemption: you must be in this list too, or your own messages get no reply either.',
+  '填写与你聊天的人的手机号或 Apple ID 邮箱，就是消息里显示的发送方；不要填 chat GUID 或群聊标识。': 'Enter the phone number or Apple ID email of the person messaging you — the sender shown on the message. Do not enter a chat GUID or group identifier.',
   "私聊对象": "Private chat",
   "选择私聊对象": "Select a private chat",
   "仅支持已经建立会话的私聊，请先与机器人私聊后刷新。": "Only established private chats are supported. Message the bot privately, then refresh.",

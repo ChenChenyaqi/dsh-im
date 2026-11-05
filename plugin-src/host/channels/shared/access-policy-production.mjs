@@ -91,7 +91,13 @@ export function initialAccessPolicyFor(channel, config = {}) {
       group: allowlistScope(),
     });
   }
-  if (['dingtalk', 'wecom', 'wecom-app', 'slack', 'discord', 'imessage', 'matrix'].includes(key)) {
+  if (key === 'imessage') {
+    // iMessage has no owner exemption and no group support: a new bot starts
+    // locked, and the only way in is a sender the operator adds themselves.
+    const scope = allowlistScope();
+    return createAccessPolicy({ direct: scope, group: scope });
+  }
+  if (['dingtalk', 'wecom', 'wecom-app', 'slack', 'discord', 'matrix'].includes(key)) {
     return createAccessPolicy({ direct: openScope(), group: openScope() });
   }
   throw new TypeError(`Unsupported access-policy channel: ${channel}`);

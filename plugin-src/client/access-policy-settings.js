@@ -2,12 +2,16 @@ import * as React from 'react';
 
 import {
   DEFAULT_ACCESS_POLICY,
+  createAccessPolicyScope,
   normalizeAccessPolicy,
   validateAccessPolicy,
 } from '../../src/channels/shared/access-policy.mjs';
 import { h, localizeText } from './i18n.js';
 
 export const ACCESS_POLICY_ENDPOINT = 'bot.access-policy.set';
+// A channel without group support keeps a locked scope. The disabled editor only
+// stops typing; without this the stored open group scope would be saved again.
+const LOCKED_GROUP_SCOPE = createAccessPolicyScope();
 const CONFIRMED_OWNER_CHANNELS = new Set(['weixin', 'feishu', 'qq', 'whatsapp', 'discord']);
 
 export const ACCESS_CHANNEL_DEFINITIONS = Object.freeze({
@@ -71,8 +75,8 @@ export const ACCESS_CHANNEL_DEFINITIONS = Object.freeze({
     groupPlaceholder: '8613800000000 或完整 JID',
   }),
   imessage: Object.freeze({
-    directUserLabel: 'iMessage Chat GUID',
-    directPlaceholder: 'iMessage;+;chat123',
+    directUserLabel: 'iMessage 发件人号码或 Apple ID',
+    directPlaceholder: '例如 +8613800000000，不要填 chat GUID',
     groupSupported: false,
   }),
 });
@@ -172,7 +176,7 @@ function ScenePolicyEditor({
   unsupported
     ? h('div', { className: 'dim-accessUnsupported', role: 'note' },
         h('strong', null, '当前渠道不支持群聊'),
-        h('p', null, '此区域无需配置，保存私聊设置时会保留现有群聊策略。'))
+        h('p', null, '此区域无需配置；保存私聊设置时会同时关闭群聊访问，并停止处理群消息。'))
     : h(React.Fragment, null,
         h('div', { className: 'dim-accessControls', 'data-mode': policy.mode },
           h('label', { className: 'dim-accessField' },
@@ -272,14 +276,30 @@ function ScenePolicyEditor({
                   }, '删除')))))));
 }
 
+/**
+ * The policy that is actually written. A channel without group support keeps a
+ * locked group scope; the disabled editor still carries the stored open one, so
+ * saving without this would leave group access wide open.
+ */
+export function accessPolicyForSave(channel, draft) {
+  const definition = ACCESS_CHANNEL_DEFINITIONS[channel];
+  return validateAccessPolicy(definition?.groupSupported === false
+    ? { ...draft, group: LOCKED_GROUP_SCOPE }
+    : draft);
+}
+
 export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved }) {
   const definition = ACCESS_CHANNEL_DEFINITIONS[channel];
-  const ownerHelp = CONFIRMED_OWNER_CHANNELS.has(channel)
-    ? '已由接入流程确认的所有者可以访问并执行命令，不受本页限制。未识别到所有者身份时，按本页访问设置执行。'
-    : '原所有者或扫码接入者始终可以访问并执行命令；以下设置仅约束其他用户。';
-  const identityHelp = channel === 'feishu'
-    ? '白名单请填写使用者的 Open ID，不是机器人的 Open ID。仅保存通配符的接入配置不包含所有者身份。'
-    : null;
+  const ownerHelp = channel === 'imessage'
+    ? 'iMessage 没有所有者豁免：你自己也要出现在这个名单里，否则你发的消息同样不会得到回复。'
+    : CONFIRMED_OWNER_CHANNELS.has(channel)
+      ? '已由接入流程确认的所有者可以访问并执行命令，不受本页限制。未识别到所有者身份时，按本页访问设置执行。'
+      : '原所有者或扫码接入者始终可以访问并执行命令；以下设置仅约束其他用户。';
+  const identityHelp = channel === 'imessage'
+    ? '填写与你聊天的人的手机号或 Apple ID 邮箱，就是消息里显示的发送方；不要填 chat GUID 或群聊标识。'
+    : channel === 'feishu'
+      ? '白名单请填写使用者的 Open ID，不是机器人的 Open ID。仅保存通配符的接入配置不包含所有者身份。'
+      : null;
   const initialPolicy = normalizeAccessPolicy(account?.accessPolicy);
   const initialKey = JSON.stringify(initialPolicy);
   const [draft, setDraft] = React.useState(() => clonePolicy(
@@ -307,7 +327,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
     setFeedback(null);
     setSaving(true);
     try {
-      const policy = validateAccessPolicy(draft);
+      const policy = accessPolicyForSave(channel, draft);
       if (typeof rpcCall !== 'function') throw new Error('访问设置暂不可用。');
       const value = unwrapRpcResult(await rpcCall(ACCESS_POLICY_ENDPOINT, {
         botId: account.botId,

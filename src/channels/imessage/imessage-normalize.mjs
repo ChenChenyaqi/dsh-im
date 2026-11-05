@@ -34,6 +34,13 @@ export function normalizeIMessage(value, { botId } = {}) {
     channelLog('normalize', 'skip', { rowid: value.rowid, reason: 'missing-ids' });
     return null;
   }
+  // Messages.app names a one-to-one chat `iMessage;-;<handle>` and a group chat
+  // `iMessage;+;chat<id>`. This bot serves a single owner, not rooms, so group
+  // traffic is dropped before it can reach the bridge at all.
+  if (chatGuid.includes(';+;')) {
+    channelLog('normalize', 'skip', { rowid: value.rowid, reason: 'group-chat', chatGuid });
+    return null;
+  }
   if (!text && images.length === 0) {
     channelLog('normalize', 'skip', { rowid: value.rowid, reason: 'empty' });
     return null;

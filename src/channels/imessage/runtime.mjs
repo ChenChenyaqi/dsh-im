@@ -32,7 +32,21 @@ class IMessageBotClient {
     this.#typing = { random: typing.random ?? Math.random };
     this.#zeroDelay = lineSendIntervalMs === 0;
   }
-  async sendText(target, text) {
+  async sendText(target, text, { instant = false } = {}) {
+    // A command receipt is one structural block: send it whole, with no
+    // per-line pacing. Chat replies keep the segmented human rhythm.
+    if (instant) {
+      const whole = String(text ?? '').trim();
+      if (!whole) return;
+      channelLog('client', 'command reply', { chars: whole.length, to: target?.address ?? target?.chatGuid });
+      await this.#api.sendText({
+        chatGuid: target.chatGuid,
+        address: target.address,
+        text: whole,
+        signal: this.#signal,
+      });
+      return;
+    }
     const parts = splitIMessageReplyParts(text);
     channelLog('client', 'reply plan', { parts: parts.length, chars: String(text ?? '').length, to: target?.address ?? target?.chatGuid });
     for (let index = 0; index < parts.length; index += 1) {
@@ -53,6 +67,10 @@ class IMessageBotClient {
     }
   }
   sendTyping() { return Promise.resolve(); }
+  /** Slash-command receipts go out whole, without segmentation or delays. */
+  sendCommandReply(target, text) {
+    return this.sendText(target, text, { instant: true });
+  }
   sendFile(target, file) {
     return sendOutboundArtifactBytes(this.#api, target, file);
   }

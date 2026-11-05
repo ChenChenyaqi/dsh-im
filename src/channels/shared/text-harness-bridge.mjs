@@ -976,6 +976,19 @@ export class TextHarnessBridge {
     await this.#deferred.whenIdle();
   }
 
+  /**
+   * Deliver a slash-command receipt. A channel whose bot can send one block
+   * (`sendCommandReply`) skips the per-line pacing that chat replies use, so a
+   * command does not arrive as a slow trickle of lines.
+   */
+  #sendCommandReply(target, text) {
+    if (typeof text !== 'string' || !text.trim()) return Promise.resolve();
+    if (typeof this.#bot.sendCommandReply === 'function') {
+      return this.#bot.sendCommandReply(target, text);
+    }
+    return this.#bot.sendText(target, text);
+  }
+
   async #processFastCommand(message, messageId, key, runner, senderId) {
     if (this.#state.hasSeen(messageId)) return;
     await this.#state.markSeen(messageId);
@@ -1022,8 +1035,8 @@ export class TextHarnessBridge {
       }
       for (const reply of result?.messages ?? [result?.message]) {
         if (reply) {
-          this.#diagnostics?.('bridge', 'deliver reply', { chars: String(reply).length, stopped: result?.stopped === true });
-          await this.#bot.sendText(target, reply);
+          this.#diagnostics?.('bridge', 'deliver command reply', { chars: String(reply).length, stopped: result?.stopped === true });
+          await this.#sendCommandReply(target, reply);
         }
       }
       this.#status.lastError = null;
@@ -1040,7 +1053,7 @@ export class TextHarnessBridge {
         `[dsh-im:${this.#descriptor.key}] failed to process a command [${failure.referenceId}]:`,
         messageFailureDiagnostic(error, failure),
       );
-      await this.#bot.sendText(target, messageFailureText(failure)).catch(() => undefined);
+      await this.#sendCommandReply(target, messageFailureText(failure)).catch(() => undefined);
     }
   }
 
@@ -1134,12 +1147,12 @@ export class TextHarnessBridge {
       const hasFiles = hasInboundFiles(message);
       const hasReply = hasReplyReference(message);
       if (!text && !hasImages && !hasFiles && !hasReply) {
-        await this.#bot.sendText(target, t('目前支持文字、图片和文件消息。'));
+        await this.#sendCommandReply(target, t('目前支持文字、图片和文件消息。'));
         return;
       }
       const command = text.toLowerCase();
       if (!hasImages && !hasFiles && command === '/help') {
-        await this.#bot.sendText(target, [
+        await this.#sendCommandReply(target, [
           t('{label}机器人已连接 DeepSeek Harness。', { label: this.#descriptor.label }),
           '',
           t('直接发送文字、图片或文件即可继续当前会话。'),
@@ -1155,7 +1168,7 @@ export class TextHarnessBridge {
           conversationKey,
           signal: this.#signal,
         });
-        await this.#bot.sendText(target, status.message);
+        await this.#sendCommandReply(target, status.message);
         return;
       }
       // Optional channel control surface (currently the companion scheduler):
@@ -1163,7 +1176,7 @@ export class TextHarnessBridge {
       if (!hasImages && !hasFiles && COMPANION_COMMAND.test(text)
         && this.#bot.companion && typeof this.#bot.companion.handle === 'function') {
         const reply = await this.#bot.companion.handle(text, { conversationKey });
-        if (reply) await this.#bot.sendText(target, reply);
+        if (reply) await this.#sendCommandReply(target, reply);
         return;
       }
       const workspaceCommand = !hasImages && !hasFiles
@@ -1174,7 +1187,7 @@ export class TextHarnessBridge {
       )) return;
       if (workspaceCommand) {
         for (const reply of workspaceCommand.messages ?? [workspaceCommand.message]) {
-          await this.#bot.sendText(target, reply);
+          await this.#sendCommandReply(target, reply);
         }
         return;
       }
@@ -1188,7 +1201,7 @@ export class TextHarnessBridge {
             this.#logger.warn?.(`[dsh-im:${this.#descriptor.key}] failed to reset context anchors after /new:`, error?.message ?? error);
           }
         }
-        await this.#bot.sendText(target, `${receipt}\n${t('请发送你的问题。')}`);
+        await this.#sendCommandReply(target, `${receipt}\n${t('请发送你的问题。')}`);
         return;
       }
       const compactCommand = !hasImages && !hasFiles
@@ -1201,7 +1214,7 @@ export class TextHarnessBridge {
           )
         : null;
       if (compactCommand) {
-        await this.#bot.sendText(target, compactCommand.message);
+        await this.#sendCommandReply(target, compactCommand.message);
         return;
       }
 

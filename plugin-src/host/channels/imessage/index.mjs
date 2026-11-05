@@ -1,27 +1,22 @@
 import { createProductionController } from './production.mjs';
 import { installIMessageRpc } from './rpc.mjs';
-import { registerManagementRpc } from '../../../management-rpc.mjs';
-import { createCompanionRpcHandler, COMPANION_ENDPOINTS } from '../../companion-rpc.mjs';
+import { createCompanionRpcHandler } from '../../companion-rpc.mjs';
 
 export const name = 'dsh-im-imessage-host';
 export const inject = ['connection', 'credentials', 'typertGateway'];
 
-export const COMPANION_RPC_CHANNEL = 'dsh-im/companion';
-
-/** Settings-page endpoints for the companion block, over the bot config store. */
-function installCompanionRpc(ctx, configStore, { authority } = {}) {
-  if (!configStore) return () => {};
-  let handler;
+/**
+ * Companion settings live on this channel's own RPC channel: the settings card
+ * reaches it through the shared rpcCall bridge, so a separate channel would
+ * never be addressed. A missing store simply leaves the endpoints unavailable.
+ */
+function companionHandlerFor(configStore) {
+  if (!configStore) return null;
   try {
-    handler = createCompanionRpcHandler({ configStore });
+    return createCompanionRpcHandler({ configStore });
   } catch {
-    return () => {};
+    return null;
   }
-  return registerManagementRpc(ctx, COMPANION_RPC_CHANNEL,
-    (endpoint, payload, signal) => (Object.values(COMPANION_ENDPOINTS).includes(endpoint)
-      ? handler(endpoint, payload, signal)
-      : { ok: false, error: { code: 'bad-request', message: '主动联系设置请求无效。' } }),
-    { authority });
 }
 
 export async function apply(ctx, config = {}) {
@@ -29,12 +24,10 @@ export async function apply(ctx, config = {}) {
   const production = await createProductionController(ctx, config, config.internals ?? {});
   const unregisterDelivery = config.deliveryService && production.deliveryAdapter
     ? config.deliveryService.registerAdapter(production.deliveryAdapter) : undefined;
-  const disposeRpc = installIMessageRpc(ctx, production.controller, config.rpcAuthority);
-  const disposeCompanion = installCompanionRpc(ctx, production.configStore, {
-    authority: config.rpcAuthority,
+  const disposeRpc = installIMessageRpc(ctx, production.controller, config.rpcAuthority, {
+    companion: companionHandlerFor(production.configStore),
   });
   ctx.effect(() => async () => {
-    disposeCompanion?.();
     await unregisterDelivery?.(); await production.close();
   }, 'dsh-im: close iMessage connections');
   return disposeRpc;

@@ -2,6 +2,7 @@ import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../sr
 import { createTokenBotRpcHandler } from '../shared/rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
 import { resolveRpcAuthority } from '../../rpc-authority.mjs';
+import { COMPANION_ENDPOINTS } from '../../companion-rpc.mjs';
 
 export const IMESSAGE_RPC_CHANNEL = '/imessage';
 export const IMESSAGE_ENDPOINTS = Object.freeze({
@@ -29,12 +30,25 @@ function withRpcDetails(result) {
   };
 }
 
-export function createIMessageRpcHandler(controller) {
+export function createIMessageRpcHandler(controller, { companion = null } = {}) {
   const diagnostics = controller.diagnostics ?? createConnectionDiagnostics({ channel: 'imessage' });
   const tokenHandler = createTokenBotRpcHandler(controller, {
     channel: 'iMessage',
   });
+  const companionEndpoints = new Set(Object.values(COMPANION_ENDPOINTS));
   return async (endpoint, payload, signal) => {
+    // The settings card runs on this same RPC channel, so the companion
+    // endpoints are answered here instead of falling through to the shared
+    // token handler (which would report them as unknown).
+    if (companionEndpoints.has(endpoint)) {
+      if (!companion) {
+        return withRpcDetails({
+          ok: false,
+          error: { code: 'companion-unavailable', message: '主动联系设置暂不可用。' },
+        });
+      }
+      return withRpcDetails(await companion(endpoint, payload, signal));
+    }
     if (endpoint === IMESSAGE_ENDPOINTS.status) {
       try {
         const value = await controller.status();
@@ -69,11 +83,11 @@ export function createIMessageRpcHandler(controller) {
   };
 }
 
-export function installIMessageRpc(ctx, controller, authority) {
+export function installIMessageRpc(ctx, controller, authority, { companion = null } = {}) {
   return registerManagementRpc(
     ctx,
     IMESSAGE_RPC_CHANNEL,
-    createIMessageRpcHandler(controller),
+    createIMessageRpcHandler(controller, { companion }),
     { authority: resolveRpcAuthority(authority) },
   );
 }

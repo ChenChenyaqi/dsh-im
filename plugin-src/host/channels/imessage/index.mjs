@@ -1,6 +1,7 @@
 import { createProductionController } from './production.mjs';
 import { installIMessageRpc } from './rpc.mjs';
 import { createCompanionRpcHandler } from '../../companion-rpc.mjs';
+import { installStickerContext } from '../../../../src/channels/imessage/imessage-stickers.mjs';
 
 export const name = 'dsh-im-imessage-host';
 export const inject = ['connection', 'credentials', 'typertGateway'];
@@ -27,10 +28,17 @@ export async function apply(ctx, config = {}) {
   const production = await createProductionController(ctx, config, config.internals ?? {});
   const unregisterDelivery = config.deliveryService && production.deliveryAdapter
     ? config.deliveryService.registerAdapter(production.deliveryAdapter) : undefined;
+  // Sticker guidance reaches the model as dynamic prompt context, gated on the
+  // Session being an iMessage conversation.
+  let disposeStickers = null;
+  const startStickers = (promptCtx) => { disposeStickers = installStickerContext(promptCtx); return disposeStickers; };
+  if (typeof ctx?.inject === 'function') ctx.inject(['systemPrompt'], startStickers);
+  else startStickers(ctx);
   const disposeRpc = installIMessageRpc(ctx, production.controller, config.rpcAuthority, {
     companion: companionHandlerFor(production.configStore, production.controller),
   });
   ctx.effect(() => async () => {
+    disposeStickers?.();
     await unregisterDelivery?.(); await production.close();
   }, 'dsh-im: close iMessage connections');
   return disposeRpc;

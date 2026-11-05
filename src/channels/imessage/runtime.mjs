@@ -12,6 +12,7 @@ import { splitIMessageReplyParts } from './reply-splitting.mjs';
 import { sendOutboundArtifactBytes } from './outbound-artifacts.mjs';
 import { channelLog } from './channel-log.mjs';
 import { CompanionController } from './companion-controller.mjs';
+import { imessageStickers, publishStickerGuidance } from './imessage-stickers.mjs';
 import { runCompanionCommand } from '../shared/companion-command.mjs';
 
 export { HUMAN_TYPING_DEFAULTS, computeHumanTypingDelayMs } from './typing-delays.mjs';
@@ -135,6 +136,7 @@ export class IMessageRuntime {
         logger: this.#logger, replyTimeoutMs: this.#replyTimeoutMs, signal: this.#abortController.signal });
       this.#status.ready = true; this.#status.connectionState = 'connected'; this.#status.lastConnectedAt = Date.now();
       this.#startCompanion();
+      for (const { sessionId } of this.#companionConversations()) publishStickerGuidance(sessionId);
       channelLog('runtime', 'connected', { pollIntervalMs: this.#pollIntervalMs });
       this.#schedulePoll(0); return this.status;
     } catch (error) { channelLog('runtime', 'start failed', { error: String(error?.message ?? error).slice(0, 200) }); this.#status.ready = false; this.#status.connectionState = 'failed'; this.#status.error = this.#diagnostics.report(error, { operation: 'connection.restore', reuse: true, botId: this.#config?.botId, automatic: true }).publicError;
@@ -230,6 +232,10 @@ export class IMessageRuntime {
         const message = normalizeIMessage(raw, { botId: this.#config.platformId });
         if (message) {
           this.#companion?.noteUserMessage?.(`direct:${message.conversationId}`);
+          // The sticker note is per Session: publish it the moment this chat is
+          // known to be an iMessage conversation.
+          const sessionId = this.#state.sessionFor?.(`direct:${message.conversationId}`);
+          if (sessionId) publishStickerGuidance(sessionId);
           await this.#bridge.accept(message);
           accepted += 1;
         }

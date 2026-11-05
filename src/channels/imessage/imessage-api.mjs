@@ -235,8 +235,7 @@ export class MacOSMessagesApi {
     const recipient = address ? normalizeAddress(address) : target.split(';').at(-1) || target;
     const content = cleanString(text);
     if (!content) throw new TypeError('iMessage text is required');
-    const reply = content.startsWith(IMESSAGE_BOT_REPLY_PREFIX)
-      ? content : `${IMESSAGE_BOT_REPLY_PREFIX}${content}`;
+    const reply = content;
     const script = `tell application "Messages"
       set serviceList to every service whose service type = iMessage
       if (count of serviceList) is 0 then error "No iMessage service is available"

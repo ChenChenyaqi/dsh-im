@@ -106,7 +106,7 @@ test('sends text through the native Messages AppleScript bridge', async () => {
   });
   assert.deepEqual(await api.sendText({ chatGuid: 'any;-;+8613800000000', address: '+8613800000000', text: 'hi' }), { sent: true });
   assert.match(scripts[0], /buddy "\+8613800000000"/);
-  assert.ok(scripts[0].includes(`send ${JSON.stringify(`${IMESSAGE_BOT_REPLY_PREFIX}hi`)}`));
+  assert.ok(scripts[0].includes(`send ${JSON.stringify('hi')}`));
 });
 
 test('self-chat accepts the owner once, ignores bot echoes and outgoing messages to others', async (t) => {

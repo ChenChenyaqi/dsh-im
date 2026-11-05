@@ -1,6 +1,9 @@
 import { t } from './i18n.mjs';
 
-const TEXT_CHANNELS = Object.freeze(['telegram', 'slack', 'discord', 'whatsapp', 'matrix']);
+// Channels running the shared TextHarnessBridge, whose commands are handled by
+// the bridge itself. iMessage is one of them; leaving it out of this list made
+// /help list only the companion entry, although every command works there.
+const TEXT_CHANNELS = Object.freeze(['telegram', 'slack', 'discord', 'whatsapp', 'matrix', 'imessage']);
 
 function defineCatalogCommand(name, description, help, { aliases = [], ...options } = {}) {
   return Object.freeze({

@@ -42,3 +42,34 @@ for (const [channel, label, Bridge] of [
     });
   }
 }
+
+// iMessage runs the shared TextHarnessBridge, so its help must list every
+// bridge command, not just the iMessage-only companion entry.
+test('iMessage /help lists the full command set', async () => {
+  const { IMessageHarnessBridge } = await import('../../../src/channels/imessage/imessage-bridge.mjs');
+  const lines = commandHelpLines('imessage');
+  for (const command of ['/new', '/compact', '/clear', '/history', '/workspace',
+    '/model', '/preset', '/stop', '/steer', '/batch', '/companion', '/status',
+    '/version', '/help']) {
+    assert.ok(lines.some((line) => line.startsWith(command)), `${command} missing from iMessage help`);
+  }
+
+  let help;
+  const bridge = new IMessageHarnessBridge({
+    bot: { sendText: async (_, text) => { help = text; } },
+    harness: {},
+    state: { hasSeen: () => false, markSeen: async () => {}, sessionFor: () => null },
+  });
+  await bridge.accept({
+    messageId: 'im-help', senderId: '+8619829734218', kind: 'direct',
+    conversationId: 'c', content: '/help', replyTarget: {},
+  });
+  assert.ok(help.includes('/new'), 'bridge /help must mention /new');
+  assert.ok(help.includes('/companion'), 'bridge /help must keep companion');
+});
+
+test('companion stays iMessage-only in the catalog', async () => {
+  const { commandsForChannel } = await import('../../../src/channels/shared/command-catalog.mjs');
+  assert.ok(commandsForChannel('imessage').some((item) => item.name === 'companion'));
+  assert.ok(!commandsForChannel('telegram').some((item) => item.name === 'companion'));
+});

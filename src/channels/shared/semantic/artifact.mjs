@@ -738,7 +738,7 @@ export function installOutboundArtifactTool(ctx, { registry = outboundArtifactRe
     name: 'dsh-im:return-file',
     order: 115,
     text: (assembly) => registry.hasActiveConsumer(assembly?.agent?.session)
-      ? `When the user asks to receive a file or generated image, call ${OUTBOUND_ARTIFACT_TOOL} with its path. Existing files can be sent directly; do not recreate or rename a file solely for delivery. This tool only registers the file; the channel uploads and sends it after your turn finishes. In your reply say the file is prepared or queued, never that it has already been sent or received. The channel reports delivery failures separately.`
+      ? `When the user asks to receive a file or generated image, call ${OUTBOUND_ARTIFACT_TOOL} with its path. Existing files can be sent directly; do not recreate or rename a file solely for delivery. This tool only registers the file; the channel uploads and sends it after your turn finishes. The channel reports delivery failures separately.`
       : '',
   });
   return true;

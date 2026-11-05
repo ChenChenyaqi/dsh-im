@@ -1,5 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { readFile, writeFile, rm } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_DB_PATH = `${process.env.HOME ?? ''}/Library/Messages/chat.db`;
@@ -60,8 +63,89 @@ function appleScriptString(value) {
 const ATTRIBUTED_BODY_STRING_CLASS = Buffer.from('NSString', 'utf8');
 const ATTRIBUTED_BODY_STRING_TAG = 0x2b; // '+': inline NSString payload follows
 // Attachment-only messages carry U+FFFC (object replacement character) instead
-// of text. The channel is text-only, so such runs must keep normalizing to null.
+// of text; image attachments normalize into `images` sources for the bridge.
 const OBJECT_REPLACEMENT_CHARACTER = '\ufffc';
+
+// iPhone photos arrive as HEIC/HEIF while models accept JPEG/PNG/WebP. Convert
+// via the always-available macOS `sips` tool before bytes reach the Harness.
+const HEIC_MEDIA_TYPES = new Set(['image/heic', 'image/heif']);
+
+function expandHomePath(value) {
+  return value.startsWith('~/') ? join(homedir(), value.slice(2)) : value;
+}
+
+function jpegName(name) {
+  const base = String(name ?? 'image').replace(/\.(heic|heif)$/i, '');
+  return `${base || 'image'}.jpg`;
+}
+
+async function readIMessageAttachment(attachment, { readFileImpl = readFile, execFileImpl = execFileAsync, signal } = {}) {
+  const path = expandHomePath(String(attachment?.path ?? ''));
+  const mediaType = String(attachment?.mediaType ?? '').toLowerCase();
+  const raw = Buffer.from(await readFileImpl(path));
+  if (!HEIC_MEDIA_TYPES.has(mediaType)) return { data: raw, mediaType: attachment.mediaType };
+  const stamp = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const input = join(tmpdir(), `dsh-im-${stamp}.heic`);
+  const output = join(tmpdir(), `dsh-im-${stamp}.jpg`);
+  try {
+    await writeFile(input, raw);
+    await execFileImpl('/usr/bin/sips', ['-s', 'format', 'jpeg', input, '--out', output], { signal });
+    return { data: Buffer.from(await readFileImpl(output)), mediaType: 'image/jpeg' };
+  } finally {
+    await rm(input, { force: true }).catch(() => undefined);
+    await rm(output, { force: true }).catch(() => undefined);
+  }
+}
+
+/** Builds bridge-compatible image sources (`name/mediaType/size/load`) from chat.db attachment rows. */
+export function imessageImageSources(attachments, loaders = {}) {
+  if (!Array.isArray(attachments)) return [];
+  return attachments.flatMap((attachment) => {
+    const mediaType = typeof attachment?.mediaType === 'string' && attachment.mediaType ? attachment.mediaType : null;
+    const path = typeof attachment?.path === 'string' && attachment.path ? attachment.path : null;
+    if (!mediaType || !path || !mediaType.toLowerCase().startsWith('image/')) return [];
+    const isHeic = HEIC_MEDIA_TYPES.has(mediaType.toLowerCase());
+    return [Object.freeze({
+      name: isHeic ? jpegName(attachment.name) : (attachment.name ?? path.split('/').pop() ?? 'image'),
+      mediaType: isHeic ? 'image/jpeg' : mediaType,
+      ...(Number.isFinite(attachment.size) ? { size: attachment.size } : {}),
+      load: (options = {}) => readIMessageAttachment(
+        { path, mediaType, name: attachment.name },
+        { ...loaders, ...options },
+      ),
+    })];
+  });
+}
+
+/** Collapses the SQL join fan-out so one message row carries all of its attachments. */
+export function mergeAttachmentRows(rows) {
+  if (!Array.isArray(rows)) return [];
+  const ordered = [];
+  const byRowid = new Map();
+  for (const row of rows) {
+    const rowid = row?.rowid;
+    const attachment = typeof row?.attachmentPath === 'string' && row.attachmentPath
+      ? {
+        path: row.attachmentPath,
+        mediaType: row.attachmentMime ?? null,
+        name: row.attachmentName ?? null,
+        ...(Number.isFinite(Number(row.attachmentBytes)) ? { size: Number(row.attachmentBytes) } : {}),
+      } : null;
+    const existing = byRowid.get(rowid);
+    if (existing) {
+      if (attachment) existing.attachments.push(attachment);
+      continue;
+    }
+    const entry = { ...row, attachments: attachment ? [attachment] : [] };
+    delete entry.attachmentPath;
+    delete entry.attachmentMime;
+    delete entry.attachmentName;
+    delete entry.attachmentBytes;
+    byRowid.set(rowid, entry);
+    ordered.push(entry);
+  }
+  return ordered;
+}
 
 // Apple NXTypedStream integer encoding: a signed byte is a literal length,
 // 0x81/0x82/0x83 introduce a little-endian 2/4/8-byte length.
@@ -123,11 +207,16 @@ export function normalizeIMessage(value, { botId } = {}) {
   if (value.serviceName !== undefined && value.serviceName !== 'iMessage') return null;
   const guid = cleanString(value.guid ?? value.id);
   const chatGuid = cleanString(value.chatGuid ?? value.chat_guid);
-  const text = cleanString(value.text)
+  // The text column may embed U+FFFC attachment placeholders next to a caption;
+  // strip them so image captions arrive as plain text.
+  let text = cleanString(value.text)
     ?? decodeAttributedBodyText(value.attributedBodyHex ?? value.attributedBody);
+  if (text) text = text.replaceAll(OBJECT_REPLACEMENT_CHARACTER, '').trim() || null;
   const sender = cleanString(value.sender ?? value.handle_id);
-  if (!guid || !chatGuid || !text || !sender) return null;
-  if (text.startsWith(IMESSAGE_BOT_REPLY_PREFIX)) return null;
+  const images = imessageImageSources(value.attachments);
+  if (!guid || !chatGuid || !sender) return null;
+  if (!text && images.length === 0) return null;
+  if (text?.startsWith(IMESSAGE_BOT_REPLY_PREFIX)) return null;
   if (value.isFromMe === 1 || value.isFromMe === true) return null;
   if (botId && sender === botId) return null;
   return Object.freeze({
@@ -137,7 +226,8 @@ export function normalizeIMessage(value, { botId } = {}) {
     kind: 'direct',
     senderId: sender,
     senderName: sender,
-    content: text,
+    content: text ?? (images.length > 0 ? '看这个' : ''),
+    images,
     addressed: true,
     replyTarget: { chatGuid, address: sender, serviceName: 'iMessage' },
     connectionTestTarget: { chatGuid, address: sender, serviceName: 'iMessage' },
@@ -190,23 +280,30 @@ export class MacOSMessagesApi {
     // Messages delivers self-chat back as an incoming copy. Read that copy once,
     // keeping all outgoing rows excluded, and filter bot replies by their marker.
     // macOS 26 (Tahoe) stores received iMessage bodies only in attributedBody, so
-    // accept either text column and decode the blob when text is empty.
+    // accept either text column and decode the blob when text is empty. Image
+    // attachments join in per message; stickers and unfinished transfers stay out.
     const query = `SELECT m.ROWID AS rowid, m.guid AS guid, m.text AS text,
       hex(m.attributedBody) AS attributedBodyHex,
       h.id AS sender, c.guid AS chatGuid, c.service_name AS serviceName,
       m.is_from_me AS isFromMe,
+      a.filename AS attachmentPath, a.mime_type AS attachmentMime,
+      a.transfer_name AS attachmentName, a.total_bytes AS attachmentBytes,
       datetime((m.date / 1000000000) + 978307200, 'unixepoch') AS receivedAt
       FROM message m
       JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
       JOIN chat c ON c.ROWID = cmj.chat_id
       LEFT JOIN handle h ON h.ROWID = m.handle_id
+      LEFT JOIN message_attachment_join maj ON maj.message_id = m.ROWID
+      LEFT JOIN attachment a ON a.ROWID = maj.attachment_id
+        AND a.is_sticker = 0 AND a.transfer_state = 5 AND a.filename IS NOT NULL
       WHERE m.ROWID > ${cursor} AND m.is_from_me = 0
-        AND ((m.text IS NOT NULL AND m.text != '') OR m.attributedBody IS NOT NULL)
+        AND ((m.text IS NOT NULL AND m.text != '') OR m.attributedBody IS NOT NULL
+          OR (a.filename IS NOT NULL AND a.mime_type LIKE 'image/%'))
         AND c.service_name = 'iMessage'${chatFilter}
       ORDER BY m.ROWID ASC LIMIT ${boundedLimit};`;
     try {
       const { stdout } = await this.#execFile('/usr/bin/sqlite3', ['-json', this.#dbPath, query], this.#execFileOptions);
-      return decodeRows(stdout);
+      return mergeAttachmentRows(decodeRows(stdout));
     } catch (error) {
       if (/authorization denied|not authorized|unable to open database/i.test(String(error?.stderr ?? error))) {
         throw permissionError('messages-database-permission-required', '请在系统设置中授予 DeepSeek Harness 完全磁盘访问权限。', error);

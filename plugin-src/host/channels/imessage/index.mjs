@@ -2,6 +2,7 @@ import { createProductionController } from './production.mjs';
 import { installIMessageRpc } from './rpc.mjs';
 import { createCompanionRpcHandler } from '../../companion-rpc.mjs';
 import { installStickerContext } from '../../../../src/channels/imessage/imessage-stickers.mjs';
+import { installPeerContext } from '../../../../src/channels/imessage/imessage-peer.mjs';
 
 export const name = 'dsh-im-imessage-host';
 export const inject = ['connection', 'credentials', 'typertGateway'];
@@ -30,15 +31,22 @@ export async function apply(ctx, config = {}) {
     ? config.deliveryService.registerAdapter(production.deliveryAdapter) : undefined;
   // Sticker guidance reaches the model as dynamic prompt context, gated on the
   // Session being an iMessage conversation.
-  let disposeStickers = null;
-  const startStickers = (promptCtx) => { disposeStickers = installStickerContext(promptCtx); return disposeStickers; };
+  let disposePromptContexts = null;
+  const startStickers = (promptCtx) => {
+    // Contexts register independently and either may be unavailable; dispose
+    // the ones that did register, in reverse order like Cordis effects do.
+    const disposers = [installStickerContext(promptCtx), installPeerContext(promptCtx)]
+      .filter((dispose) => typeof dispose === 'function');
+    disposePromptContexts = () => { for (const dispose of disposers.reverse()) dispose(); };
+    return disposePromptContexts;
+  };
   if (typeof ctx?.inject === 'function') ctx.inject(['systemPrompt'], startStickers);
   else startStickers(ctx);
   const disposeRpc = installIMessageRpc(ctx, production.controller, config.rpcAuthority, {
     companion: companionHandlerFor(production.configStore, production.controller),
   });
   ctx.effect(() => async () => {
-    disposeStickers?.();
+    disposePromptContexts?.();
     await unregisterDelivery?.(); await production.close();
   }, 'dsh-im: close iMessage connections');
   return disposeRpc;

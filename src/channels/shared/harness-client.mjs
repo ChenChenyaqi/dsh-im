@@ -2097,11 +2097,11 @@ export class HarnessClient {
         }
         stagedBatches.push(staged);
         const images = await imageContentFromStaged(staged, limits, { signal });
-        const originalContent = typeof basePrompt === 'string'
-          ? [{ type: 'text', text: basePrompt }] : basePrompt;
-        prompt = appendInboundFilesToPrompt([...originalContent, ...images], {
-          files: stagedBatches.flatMap((batch) => batch.files),
-        });
+        const withFileManifest = typeof prompt === 'string'
+          ? [{ type: 'text', text: prompt }] : prompt;
+        // Images reach the model as content blocks only: no per-image caption
+        // markers and no image manifest; an accompanying file manifest survives.
+        prompt = [...withFileManifest, ...images];
       }
       if (interactionSignal) {
         diagnostic.stage = 'interaction.open';

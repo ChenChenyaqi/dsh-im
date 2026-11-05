@@ -25,6 +25,7 @@ async function temporary(t) {
 }
 function manifest(content) {
   const blocks = content.filter((part) => part.type === 'text' && part.text.includes('<dsh_im_files>'));
+  if (blocks.length === 0) return [];
   assert.equal(blocks.length, 1);
   return JSON.parse(blocks[0].text.split('\n').find((line) => line.startsWith('{'))).files;
 }
@@ -179,8 +180,8 @@ test('Harness saves originals before model admission, preserves accompanying fil
   let loads = 0;
   const fixture = await clientFixture(t, { onPrompt: async (content) => {
     const files = manifest(content);
-    assert.equal(files.length, 2);
-    assert.deepEqual(await readFile(join(fixture.root, files[1].path)), large);
+    assert.equal(files.length, 1);
+    assert.deepEqual(await readFile(join(fixture.root, files[0].path)), Buffer.from('notes'));
     assert.ok(Buffer.from(content.find((part) => part.type === 'image').data, 'base64').length <= 5 * MB);
   } });
   assert.equal(await fixture.client.ask('test-session', 'look', {
@@ -189,6 +190,9 @@ test('Harness saves originals before model admission, preserves accompanying fil
   }), 'verified');
   assert.equal(loads, 1);
   assert.equal(fixture.prompts.length, 1);
+  // The staged original still lands in the workspace even without a manifest.
+  assert.equal(fixture.staged.length, 2);
+  assert.deepEqual(await readFile(join(fixture.root, fixture.staged[1].files[0].path)), large);
 });
 
 for (const reason of ['MODEL_DOES_NOT_SUPPORT_IMAGES', 'IMAGE_TOO_LARGE', 'IMAGES_TOO_LARGE', 'TOO_MANY_IMAGES', 'IMAGE_TOO_MANY_PIXELS']) {
@@ -203,7 +207,8 @@ for (const reason of ['MODEL_DOES_NOT_SUPPORT_IMAGES', 'IMAGE_TOO_LARGE', 'IMAGE
     assert.equal(fixture.prompts.length, 2);
     assert.equal(fixture.prompts[0].rpcId, fixture.prompts[1].rpcId);
     assert.equal(fixture.prompts[1].content.some((part) => part.type === 'image'), false);
-    assert.deepEqual(manifest(fixture.prompts[0].content), manifest(fixture.prompts[1].content));
+    assert.equal(manifest(fixture.prompts[0].content).length, 0);
+    assert.equal(manifest(fixture.prompts[1].content).length, 1);
   });
 }
 
@@ -231,7 +236,7 @@ test('policy is captured on each ask and loader errors remain image diagnostics'
 
 for (const channel of ['slack', 'telegram', 'discord', 'whatsapp']) {
   test(`${channel} shared bridge passes images through real Harness staging and compression`, async (t) => {
-    const { root, client, prompts } = await clientFixture(t);
+    const { root, client, prompts, staged } = await clientFixture(t);
     const seen = new Set();
     const sent = [];
     const image = Buffer.concat([PNG, Buffer.alloc(6 * MB)]);
@@ -243,13 +248,15 @@ for (const channel of ['slack', 'telegram', 'discord', 'whatsapp']) {
       images: [{ name: 'big.png', data: image }], replyTarget: {} });
     assert.deepEqual(sent, ['verified']);
     assert.equal(prompts.length, 1);
-    const files = manifest(prompts[0].content);
-    assert.deepEqual(await readFile(join(root, files[0].path)), image);
+    const content = prompts[0].content;
+    assert.ok(Buffer.from(content.find((part) => part.type === 'image').data, 'base64').length <= 5 * MB);
+    assert.equal(manifest(content).length, 0);
+    assert.deepEqual(await readFile(join(root, staged[0].files[0].path)), image);
   });
 }
 
 test('WeCom app media downloads pass through real Harness staging and compression', async (t) => {
-  const { root, client, prompts } = await clientFixture(t);
+  const { root, client, prompts, staged } = await clientFixture(t);
   const seen = new Set();
   const sent = [];
   const image = Buffer.concat([PNG, Buffer.alloc(6 * MB)]);
@@ -275,5 +282,6 @@ test('WeCom app media downloads pass through real Harness staging and compressio
   assert.equal(prompts.length, 1);
   const content = prompts[0].content;
   assert.ok(Buffer.from(content.find((part) => part.type === 'image').data, 'base64').length <= 5 * MB);
-  assert.deepEqual(await readFile(join(root, manifest(content)[0].path)), image);
+  assert.equal(manifest(content).length, 0);
+  assert.deepEqual(await readFile(join(root, staged[0].files[0].path)), image);
 });

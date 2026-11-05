@@ -107,11 +107,10 @@ export async function imageContentFromStaged(staged, limits, { signal, sharpLoad
       Math.min(limits.maxImageBytes, remaining), { signal, sharpLoader });
     if (!result) { fileOnly.push(index + 1); continue; }
     remaining -= result.data.length;
-    content.push({ type: 'text', text: t('图片 {index}（原图文件：{name}）', { index: index + 1, name: file.name }) },
+    content.push(
       { type: 'image', mediaType: result.mediaType, data: result.data.toString('base64'),
         name: imageStorageName(file.name.replace(/\.[^.]+$/, ''), result.mediaType, index) });
   }
-  content.push({ type: 'text', text: t(IMAGE_ORIGINALS_PROMPT) });
   if (fileOnly.length) content.push({ type: 'text',
     text: t(IMAGE_INPUT_FALLBACK_PROMPT, { indexes: fileOnly.join(', ') }) });
   return content;

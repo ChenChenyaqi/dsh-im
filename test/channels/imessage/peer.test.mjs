@@ -24,8 +24,8 @@ function contactsFile(entries) {
 }
 
 test('guidance names the handle and a recorded nickname', () => {
-  const text = buildPeerGuidance({ handle: HANDLE, name: '陈亚琪' });
-  assert.ok(text.includes('陈亚琪'));
+  const text = buildPeerGuidance({ handle: HANDLE, name: '陈亚奇' });
+  assert.ok(text.includes('陈亚奇'));
   assert.ok(text.includes(HANDLE));
   assert.ok(text.includes('iMessage'));
 });
@@ -44,8 +44,8 @@ test('an empty handle renders no guidance at all', () => {
 });
 
 test('loadPeerName reads the contacts file and survives bad input', () => {
-  const file = contactsFile({ [HANDLE]: '陈亚琪', '+8613800000001': 42, '': 'x' });
-  assert.equal(loadPeerName(HANDLE, { file }), '陈亚琪');
+  const file = contactsFile({ [HANDLE]: '陈亚奇', '+8613800000001': 42, '': 'x' });
+  assert.equal(loadPeerName(HANDLE, { file }), '陈亚奇');
   assert.equal(loadPeerName('+8613800000001', { file }), null); // non-string value
   assert.equal(loadPeerName('+8615229293783', { file }), null); // unknown handle
 
@@ -58,9 +58,11 @@ test('loadPeerName reads the contacts file and survives bad input', () => {
 
 test('the registry serves text per session and forgets on demand', () => {
   try {
-    publishPeerGuidance('session-a', HANDLE, { file: contactsFile({ [HANDLE]: '陈亚琪' }) });
-    publishPeerGuidance('session-b', HANDLE);
-    assert.match(imessagePeers.get('session-a'), /陈亚琪/u);
+    publishPeerGuidance('session-a', HANDLE, { file: contactsFile({ [HANDLE]: '陈亚奇' }) });
+    // An explicit file: the operator's real ~/.dsh/im/contacts.json must not
+    // leak into the test run and make this assertion machine-dependent.
+    publishPeerGuidance('session-b', HANDLE, { file: join(tmpdir(), 'im-peer-absent.json') });
+    assert.match(imessagePeers.get('session-a'), /陈亚奇/u);
     assert.match(imessagePeers.get('session-b'), /还不知道叫什么/u);
     // An unknown handle clears the note instead of naming nobody.
     publishPeerGuidance('session-a', '');

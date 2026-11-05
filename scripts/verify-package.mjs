@@ -193,9 +193,9 @@ if (/role:\s*["']switch|type:\s*["']checkbox/.test(otherClientSources)
   || (conversationDirectorySettingsSource.match(/role:\s*["']switch["']/g) ?? []).length !== 1
   || (deliverySyncSettingsSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
   || /role:\s*["']switch["']/u.test(deliverySyncSettingsSource)
-  || (client.match(/role:\s*["']switch["']/g) ?? []).length !== 3
+  || (client.match(/role:\s*["']switch["']/g) ?? []).length !== 4
   || (companionSettingsSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
-  || /role:\s*["']switch["']/u.test(companionSettingsSource)
+  || (companionSettingsSource.match(/role:\s*["']switch["']/g) ?? []).length !== 1
   || (client.match(/type:\s*["']checkbox["']/g) ?? []).length !== 9) {
   throw new Error('checkable inputs must be limited to context enhancement, Session sync, email settings, Telegram thinking traces, Feishu panel settings, conversation-directory settings, the iMessage companion card, and the Delivery tab');
 }

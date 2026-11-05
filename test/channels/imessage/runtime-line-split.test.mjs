@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { IMessageBotClient, splitIMessageReplyParts } from '../../../src/channels/imessage/runtime.mjs';
+import { IMessageBotClient, splitIMessageReplyParts, computeHumanTypingDelayMs } from '../../../src/channels/imessage/runtime.mjs';
 
 function createApiSpy() {
   const calls = [];
@@ -86,4 +86,47 @@ test('splitIMessageReplyParts still splits plain lines around blocks', () => {
     splitIMessageReplyParts('第一句\n\n```js\nx();\n```\n\n  第二句  \n'),
     ['第一句', '```js\nx();\n```', '第二句'],
   );
+});
+
+const half = () => 0.5;
+const zero = () => 0;
+const one = () => 1;
+
+test('typing delay grows with reply length for plain text', () => {
+  assert.equal(computeHumanTypingDelayMs('好', { random: half }), 500);
+  assert.equal(computeHumanTypingDelayMs('好'.repeat(100), { random: half }), 5_000);
+});
+
+test('first reply waits longer than follow-up lines', () => {
+  assert.equal(computeHumanTypingDelayMs('好', { isFirst: true, random: half }), 1_450);
+  assert.equal(computeHumanTypingDelayMs('好', { isFirst: false, random: half }), 500);
+});
+
+test('fenced code blocks use a short paste delay regardless of length', () => {
+  assert.equal(computeHumanTypingDelayMs('```js\nconsole.log(1);', { random: half }), 550);
+  assert.equal(computeHumanTypingDelayMs('```js\n' + 'x'.repeat(5_000), { isFirst: true, random: half }), 550);
+});
+
+test('typing delay is jittered and clamped to bounds', () => {
+  // Same "好": non-first base 500 -> 375 with the lowest rng, 625 with the highest.
+  assert.equal(computeHumanTypingDelayMs('好', { random: zero }), 375);
+  assert.equal(computeHumanTypingDelayMs('好', { random: one }), 625);
+  // Paste base 300 with the lowest rng (225) is clamped up to the floor.
+  assert.equal(computeHumanTypingDelayMs('```', { random: zero }), 250);
+});
+
+test('client sends every part even with real typing delays', async () => {
+  const api = createApiSpy();
+  const slow = new IMessageBotClient(api, null, { typing: { random: zero } });
+  await slow.sendText(target, 'a\nb');
+  assert.deepEqual(api.calls.map((call) => call.text), ['a', 'b']);
+});
+
+test('client aborts before the first delay sends nothing', async () => {
+  const api = createApiSpy();
+  const controller = new AbortController();
+  controller.abort();
+  const aborted = new IMessageBotClient(api, controller.signal, { typing: { random: half } });
+  await assert.rejects(() => aborted.sendText(target, 'x\ny'));
+  assert.equal(api.calls.length, 0);
 });

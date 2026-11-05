@@ -4,7 +4,38 @@ import { MacOSMessagesApi, normalizeIMessage } from './imessage-api.mjs';
 import { createIMessageBridgeStatus, IMessageHarnessBridge } from './imessage-bridge.mjs';
 
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
-const DEFAULT_LINE_SEND_INTERVAL_MS = 400;
+
+export const HUMAN_TYPING_DEFAULTS = Object.freeze({
+  firstReplyMinMs: 600,
+  firstReplyMaxMs: 1_800,
+  baseDelayMs: 250,
+  charsPerSecond: 4,
+  minDelayMs: 250,
+  maxDelayMs: 5_000,
+  jitterRatio: 0.25,
+  pasteMinMs: 300,
+  pasteMaxMs: 800,
+});
+
+/**
+ * Simulates human typing rhythm: longer replies wait longer, fenced code
+ * blocks are treated as pastes with a short flat delay, and every value is
+ * jittered and clamped so the pace never looks mechanical.
+ */
+export function computeHumanTypingDelayMs(nextText, { isFirst = false, random = Math.random } = {}) {
+  const options = HUMAN_TYPING_DEFAULTS;
+  const rand = (min, max) => min + random() * (max - min);
+  const text = String(nextText ?? '');
+  let base;
+  if (text.trim().startsWith('```')) {
+    base = rand(options.pasteMinMs, options.pasteMaxMs);
+  } else {
+    base = (isFirst ? rand(options.firstReplyMinMs, options.firstReplyMaxMs) : options.baseDelayMs)
+      + (Array.from(text).length / options.charsPerSecond) * 1_000;
+  }
+  const jitter = 1 + rand(-options.jitterRatio, options.jitterRatio);
+  return Math.min(options.maxDelayMs, Math.max(options.minDelayMs, Math.round(base * jitter)));
+}
 
 function waitLineInterval(signal, ms) {
   return new Promise((resolve, reject) => {
@@ -43,14 +74,23 @@ export function splitIMessageReplyParts(text) {
 class IMessageBotClient {
   #api;
   #signal;
-  #lineSendIntervalMs;
-  constructor(api, signal, { lineSendIntervalMs = DEFAULT_LINE_SEND_INTERVAL_MS } = {}) {
-    this.#api = api; this.#signal = signal; this.#lineSendIntervalMs = lineSendIntervalMs;
+  #typing;
+  #zeroDelay;
+  constructor(api, signal, { lineSendIntervalMs, typing = {} } = {}) {
+    this.#api = api; this.#signal = signal;
+    this.#typing = { random: typing.random ?? Math.random };
+    this.#zeroDelay = lineSendIntervalMs === 0;
   }
   async sendText(target, text) {
     const parts = splitIMessageReplyParts(text);
     for (let index = 0; index < parts.length; index += 1) {
-      if (index > 0) await waitLineInterval(this.#signal, this.#lineSendIntervalMs);
+      if (!this.#zeroDelay) {
+        const delay = computeHumanTypingDelayMs(parts[index], {
+          isFirst: index === 0,
+          random: this.#typing.random,
+        });
+        await waitLineInterval(this.#signal, delay);
+      }
       await this.#api.sendText({
         chatGuid: target.chatGuid,
         address: target.address,

@@ -4,21 +4,65 @@ import { MacOSMessagesApi, normalizeIMessage } from './imessage-api.mjs';
 import { createIMessageBridgeStatus, IMessageHarnessBridge } from './imessage-bridge.mjs';
 
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
+const DEFAULT_LINE_SEND_INTERVAL_MS = 400;
+
+function waitLineInterval(signal, ms) {
+  return new Promise((resolve, reject) => {
+    if (ms <= 0) { resolve(); return; }
+    const abort = () => { clearTimeout(timer); reject(signal?.reason ?? new Error('iMessage line send aborted')); };
+    if (signal?.aborted) { abort(); return; }
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, ms);
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+}
+
+export function splitIMessageReplyParts(text) {
+  const raw = String(text ?? '');
+  const parts = [];
+  let block = null;
+  for (const line of raw.split('\n')) {
+    if (block) {
+      block.push(line);
+      if (block.length > 1 && line.trim().startsWith('```')) {
+        parts.push(block.join('\n'));
+        block = null;
+      }
+      continue;
+    }
+    if (line.trim().startsWith('```')) {
+      block = [line];
+      continue;
+    }
+    const plain = line.trim();
+    if (plain) parts.push(plain);
+  }
+  if (block) parts.push(block.join('\n'));
+  return parts.length > 0 ? parts : [raw.trim()];
+}
 
 class IMessageBotClient {
   #api;
   #signal;
-  constructor(api, signal) { this.#api = api; this.#signal = signal; }
-  sendText(target, text) {
-    return this.#api.sendText({
-      chatGuid: target.chatGuid,
-      address: target.address,
-      text,
-      signal: this.#signal,
-    });
+  #lineSendIntervalMs;
+  constructor(api, signal, { lineSendIntervalMs = DEFAULT_LINE_SEND_INTERVAL_MS } = {}) {
+    this.#api = api; this.#signal = signal; this.#lineSendIntervalMs = lineSendIntervalMs;
+  }
+  async sendText(target, text) {
+    const parts = splitIMessageReplyParts(text);
+    for (let index = 0; index < parts.length; index += 1) {
+      if (index > 0) await waitLineInterval(this.#signal, this.#lineSendIntervalMs);
+      await this.#api.sendText({
+        chatGuid: target.chatGuid,
+        address: target.address,
+        text: parts[index],
+        signal: this.#signal,
+      });
+    }
   }
   sendTyping() { return Promise.resolve(); }
 }
+
+export { IMessageBotClient };
 
 export function createIMessageRuntimeStatus() {
   return { startedAt: null, ready: false, connectionState: 'idle', harnessReachable: false,

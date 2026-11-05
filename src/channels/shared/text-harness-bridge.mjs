@@ -4,6 +4,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from './deferred-delivery-coordinator.mjs';
 import { t } from './i18n.mjs';
 import { commandHelpLines } from './command-catalog.mjs';
+import { isSharedLocalCommand } from './command-permission.mjs';
 import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   evaluateInboundAccess,
@@ -353,6 +354,18 @@ export class TextHarnessBridge {
       if (!decision.allowed) {
         this.#status.messagesRejected += 1;
         this.#status.lastRejectedAt = new Date().toISOString();
+        // Without this a denial is indistinguishable from a turn that ran and
+        // failed: the sender sees silence either way, and the only trace was a
+        // counter inside the settings page.
+        this.#diagnostics?.('bridge', 'access denied', {
+          reason: decision.reason,
+          kind,
+          senderId,
+          command: isSharedLocalCommand(controlTextOf(normalized), {
+            hasImages,
+            hasFiles,
+          }),
+        });
         // Mark policy denials so a webhook replay cannot repeat local work or
         // a command-permission notice.
         this.#acceptedMessageIds.set(messageId, null);

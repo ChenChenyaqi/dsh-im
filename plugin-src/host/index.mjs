@@ -17,6 +17,7 @@ import { installOutboundArtifactTool } from '../../src/channels/shared/semantic/
 import { installHostLanguage } from './host-language.mjs';
 import { installHostLanguageRpc } from './host-language-rpc.mjs';
 import { installDeliveryRpc } from './delivery-rpc.mjs';
+import { installProactiveRelay } from './proactive-relay.mjs';
 import { installDeliveryHttp } from './delivery-http.mjs';
 import { createDeliveryService } from './delivery-service.mjs';
 import { createDsBotClient } from './ds-bot-client.mjs';
@@ -239,6 +240,7 @@ export function createImHostPlugin(internals = {}) {
       }
       try {
         startDelivery(ctx, deliveryService, { authority: config.rpcAuthority });
+        installProactiveRelay(ctx, deliveryService, { logger });
       } catch (error) {
         logger.error?.('[dsh-im] failed to activate delivery management; continuing with channels', error);
       }

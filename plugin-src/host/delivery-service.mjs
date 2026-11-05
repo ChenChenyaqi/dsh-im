@@ -738,6 +738,32 @@ export class DeliveryService {
     } catch (error) { throw publicOperationError(error); }
   }
 
+  /**
+   * Relay a background-turn text to whichever registered conversation owns
+   * `sessionId`. Returns the adapter send result, or null when no channel
+   * claims the session (the text stays available in the receiving session).
+   */
+  async relaySessionText(sessionId, text, { signal } = {}) {
+    if (typeof sessionId !== 'string' || !sessionId
+      || typeof text !== 'string' || !text.trim()) {
+      throw deliveryError('bad-request');
+    }
+    cancellation(signal);
+    for (const { adapter } of this.#adapters.values()) {
+      if (typeof adapter.describeConversationBySession !== 'function') continue;
+      const info = await adapter.describeConversationBySession(sessionId);
+      if (!info?.conversationKey) continue;
+      const target = deliverySuggestionFromConversationKey(adapter.channel, info.conversationKey);
+      if (!target) continue;
+      try {
+        return await adapter.sendText(info.botId, target, text, { signal });
+      } catch (error) {
+        throw publicOperationError(error);
+      }
+    }
+    return null;
+  }
+
   async send(botId, targetIdOrDraft, text, { signal, format = 'plain' } = {}) {
     const id = botIdOf(botId);
     const targetKey = typeof targetIdOrDraft === 'string'

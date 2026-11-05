@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
 import { normalizeDeliveryTarget } from './delivery-adapter.mjs';
 import { deliverySuggestionFromConversationKey } from './delivery-suggestions.mjs';
 import { COMPETITIVE_APPROVAL_CHANNELS } from '../../src/channels/shared/harness-approval.mjs';
@@ -6,6 +7,14 @@ import { t } from '../../src/channels/shared/i18n.mjs';
 import { parseConversationKey } from '../../src/channels/shared/conversation/describe.mjs';
 
 const BOT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+
+// Temporary diagnostics shared with proactive-relay.mjs.
+function relayDebug(line) {
+  try {
+    appendFileSync(`${process.env.HOME ?? ''}/.dsh/im/relay-debug.log`,
+      `${new Date().toISOString()} ${line}\n`);
+  } catch {}
+}
 const TARGET_ID_PATTERN = /^[A-Za-z0-9._:@-]{1,128}$/;
 const CHANNEL_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 const DRAFT_TARGET_ID = '__test__';
@@ -749,18 +758,39 @@ export class DeliveryService {
       throw deliveryError('bad-request');
     }
     cancellation(signal);
+    relayDebug(`relaySessionText start: session=${sessionId} adapters=${this.#adapters.size}`);
     for (const { adapter } of this.#adapters.values()) {
       if (typeof adapter.describeConversationBySession !== 'function') continue;
-      const info = await adapter.describeConversationBySession(sessionId);
-      if (!info?.conversationKey) continue;
-      const target = deliverySuggestionFromConversationKey(adapter.channel, info.conversationKey);
-      if (!target) continue;
+      let info;
       try {
-        return await adapter.sendText(info.botId, target, text, { signal });
+        info = await adapter.describeConversationBySession(sessionId);
       } catch (error) {
+        relayDebug(`describe failed on ${adapter.channel}: ${error?.message ?? error}`);
+        continue;
+      }
+      if (!info?.conversationKey) {
+        relayDebug(`no binding on ${adapter.channel}`);
+        continue;
+      }
+      const target = deliverySuggestionFromConversationKey(adapter.channel, info.conversationKey);
+      relayDebug(`binding on ${adapter.channel}: key=${info.conversationKey} bot=${info.botId} target=${JSON.stringify(target)}`);
+      if (!target) continue;
+      // Adapter sendText normalizes targets, which require a stable targetId;
+      // derive one deterministically from the conversation key.
+      const relayTarget = {
+        ...target,
+        targetId: `relay_${createHash('sha256').update(`${adapter.channel}:${info.conversationKey}`).digest('hex').slice(0, 24)}`,
+      };
+      try {
+        const result = await adapter.sendText(info.botId, relayTarget, text, { signal });
+        relayDebug(`sendText ok on ${adapter.channel}: ${JSON.stringify(result)?.slice(0, 120)}`);
+        return result;
+      } catch (error) {
+        relayDebug(`sendText failed on ${adapter.channel}: ${error?.stack ?? error}`);
         throw publicOperationError(error);
       }
     }
+    relayDebug(`no adapter claimed session ${sessionId}`);
     return null;
   }
 

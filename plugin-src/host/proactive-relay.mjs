@@ -5,6 +5,14 @@
 
 const SKIP_MARKER = 'SKIP';
 
+// Temporary diagnostics: written under the IM workspace so a failed relay is
+// observable without console access in the packaged desktop host.
+import { appendFileSync } from 'node:fs';
+const DEBUG_LOG = `${process.env.HOME ?? ''}/.dsh/im/relay-debug.log`;
+function debug(line) {
+  try { appendFileSync(DEBUG_LOG, `${new Date().toISOString()} ${line}\n`); } catch {}
+}
+
 function sessionIdOf(session) {
   if (typeof session === 'string') return session || null;
   const sessionId = session?.id ?? session?.header?.id;
@@ -31,10 +39,12 @@ function assistantTextOf(data) {
 export function installProactiveRelay(ctx, deliveryService, { logger = console } = {}) {
   if (typeof ctx?.on !== 'function' || !deliveryService
     || typeof deliveryService.relaySessionText !== 'function') {
+    debug(`install refused: ctx.on=${typeof ctx?.on}, service=${deliveryService?.constructor?.name}, relay=${typeof deliveryService?.relaySessionText}`);
     return false;
   }
   // sessionId → tracked turn { turn, background, text }
   const tracked = new Map();
+  debug('installed');
 
   ctx.on('session/event', (session, event) => {
     const sessionId = sessionIdOf(session);
@@ -52,7 +62,10 @@ export function installProactiveRelay(ctx, deliveryService, { logger = console }
       const source = event.data?.source;
       // Channel bridges submit prompts with an rpcId; schedule injections carry
       // source.kind === 'schedule' without one. Only those turns are relayed.
-      if (source?.kind === 'schedule' && !source.rpcId) entry.background = true;
+      if (source?.kind === 'schedule' && !source.rpcId) {
+        entry.background = true;
+        debug(`session ${sessionId} turn ${entry.turn}: background (schedule source)`);
+      }
       return;
     }
     if (event.type === 'assistant/message') {
@@ -66,8 +79,15 @@ export function installProactiveRelay(ctx, deliveryService, { logger = console }
       if (!entry.background || event.data?.turn !== entry.turn) return;
       const text = entry.text.trim();
       // A reminder that deliberately has nothing to say stays silent.
-      if (!text || text === SKIP_MARKER) return;
-      deliveryService.relaySessionText(sessionId, text).catch((error) => {
+      if (!text || text === SKIP_MARKER) {
+        debug(`session ${sessionId} turn ${entry.turn}: silent (empty/SKIP)`);
+        return;
+      }
+      debug(`session ${sessionId} turn ${entry.turn}: relaying ${JSON.stringify(text.slice(0, 80))}`);
+      deliveryService.relaySessionText(sessionId, text).then((result) => {
+        debug(`session ${sessionId} relay result: ${JSON.stringify(result)?.slice(0, 200)}`);
+      }).catch((error) => {
+        debug(`session ${sessionId} relay error: ${error?.stack ?? error}`);
         logger.warn?.('[dsh-im] proactive relay failed for', sessionId, error);
       });
     }

@@ -126,10 +126,11 @@ test('delivery service resolves the owning adapter and sends through it', async 
   });
   const result = await service.relaySessionText('session-one', '到点了，去睡');
   assert.deepEqual(result, { sent: true });
-  assert.deepEqual(sends, [{
-    botId: 'bot-1',
-    target: { kind: 'user', route: { chatGuid: 'iMessage;-;+8613800000000' } },
-    text: '到点了，去睡',
-  }]);
+  assert.equal(sends.length, 1);
+  assert.equal(sends[0].botId, 'bot-1');
+  assert.match(sends[0].target.targetId, /^relay_[0-9a-f]{24}$/);
+  assert.equal(sends[0].target.kind, 'user');
+  assert.deepEqual(sends[0].target.route, { chatGuid: 'iMessage;-;+8613800000000' });
+  assert.equal(sends[0].text, '到点了，去睡');
   assert.equal(await service.relaySessionText('session-unknown', 'text'), null);
 });

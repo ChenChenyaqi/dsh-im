@@ -229,3 +229,46 @@ test('remainingToday reports the current period budget', () => {
     cap: 1, used: 0, remaining: 1, night: true,
   });
 });
+
+// The configured every range is the hard bound: no phase or mood may push the
+// sampled wait outside it. Before the in-window bias this reached 17h in deep
+// night and 28h once decay stacked on top.
+test('sampled waits never leave the configured interval window', () => {
+  const config = normalizeCompanionConfig();
+  const moods = [createMood(), createMood({ consecutiveIgnored: 5 })];
+  for (const [label, time, night] of [
+    ['work-morning', at(10, 30), false],
+    ['afternoon', at(15, 0), false],
+    ['late', at(23, 0), true],
+    ['deep-night', at(3, 0), true],
+  ]) {
+    const min = night ? config.nightIntervalMinMs : config.dayIntervalMinMs;
+    const max = night ? config.nightIntervalMaxMs : config.dayIntervalMaxMs;
+    for (const mood of moods) {
+      for (const draw of [() => 0, () => 1, () => 0.37]) {
+        const delay = pickDelay(time, { config, mood, random: draw });
+        assert.ok(delay >= min && delay <= max,
+          `${label} delay ${delay} left [${min}, ${max}]`);
+      }
+    }
+  }
+});
+
+test('a calm noon draw keeps the old uniform distribution', () => {
+  const config = normalizeCompanionConfig();
+  // Noon carries no stretch and a fresh mood no decay: bias is zero, so the
+  // position maps straight through and the endpoints are the configured
+  // bounds exactly.
+  assert.equal(pickDelay(at(13, 0), { config, mood: createMood(), random: () => 0 }),
+    config.dayIntervalMinMs);
+  assert.equal(pickDelay(at(13, 0), { config, mood: createMood(), random: () => 1 }),
+    config.dayIntervalMaxMs);
+});
+
+test('deep night plus an ignored streak still caps at the night maximum', () => {
+  const config = normalizeCompanionConfig();
+  const delay = pickDelay(at(3, 0), {
+    config, mood: createMood({ consecutiveIgnored: 5 }), random: () => 1,
+  });
+  assert.equal(delay, config.nightIntervalMaxMs);
+});

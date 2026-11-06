@@ -122,8 +122,11 @@ export function isDeepQuiet(now, config = COMPANION_DEFAULTS) {
 }
 
 /**
- * Sample the wait before the next reach-out. Night stretches the range, a busy
- * phase stretches it further, and an ignored streak multiplies the result.
+ * Sample the wait before the next reach-out. Night uses its own wider window;
+ * a busy phase or a cold-shoulder streak biases the draw toward the far end of
+ * that window. The configured every range is the hard bound either way: the
+ * wait never lands outside [intervalMin, intervalMax] however long the stretch
+ * and decay stack up.
  */
 export function pickDelay(now, { config = COMPANION_DEFAULTS, mood, random = Math.random } = {}) {
   const night = isNight(now, config);
@@ -131,12 +134,14 @@ export function pickDelay(now, { config = COMPANION_DEFAULTS, mood, random = Mat
   const max = night ? config.nightIntervalMaxMs : config.dayIntervalMaxMs;
   const phase = phaseOf(now);
   const stretch = PHASE_STRETCH[phase.id] ?? 1;
-  const base = min + random() * (max - min);
   const multiplier = intervalMultiplier(mood, { decay: config.decay });
-  return Math.round(Math.min(
-    config.nightIntervalMaxMs * 4,
-    Math.max(MINUTE, base * stretch * multiplier),
-  ));
+  // Stretch and decay bend the draw toward `max`; they no longer multiply past
+  // it, which used to turn a configured 45-150min day into a 17h deep-night
+  // wait (28h once the decay cap stacked on top).
+  const bias = 1 - (stretch * multiplier) ** -0.5;
+  const position = random();
+  const biased = Math.min(1, Math.max(0, position + (1 - position) * bias));
+  return Math.round(min + (max - min) * biased);
 }
 
 /** Sample the silence kept after the user's own last message. */

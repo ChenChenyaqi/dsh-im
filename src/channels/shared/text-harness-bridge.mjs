@@ -60,7 +60,7 @@ import {
 import { deliverOutboundArtifacts } from './semantic/artifact-delivery.mjs';
 import { prependSpeakerLabel } from './speaker-label.mjs';
 /** Channels that expose `bot.companion` handle this command themselves. */
-const COMPANION_COMMAND = /^\/(?:companion|cp)(?=$|\s)/i;
+export const COMPANION_COMMAND = /^\/(?:companion|cp)(?=$|\s)/i;
 import {
   hasReplyReference,
   promptContentForInboundMessage,

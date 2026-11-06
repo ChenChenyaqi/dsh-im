@@ -13,7 +13,10 @@ import { sendOutboundArtifactBytes } from './outbound-artifacts.mjs';
 import { channelLog } from './channel-log.mjs';
 import { CompanionController } from './companion-controller.mjs';
 import { imessageStickers, publishStickerGuidance } from './imessage-stickers.mjs';
+import { publishPeerGuidance } from './imessage-peer.mjs';
 import { runCompanionCommand } from '../shared/companion-command.mjs';
+import { COMPANION_COMMAND } from '../shared/text-harness-bridge.mjs';
+import { isSharedLocalCommand } from '../shared/command-permission.mjs';
 
 export { HUMAN_TYPING_DEFAULTS, computeHumanTypingDelayMs } from './typing-delays.mjs';
 export { splitIMessageReplyParts } from './reply-splitting.mjs';
@@ -154,7 +157,10 @@ export class IMessageRuntime {
         logger: this.#logger, replyTimeoutMs: this.#replyTimeoutMs, signal: this.#abortController.signal });
       this.#status.ready = true; this.#status.connectionState = 'connected'; this.#status.lastConnectedAt = Date.now();
       this.#startCompanion();
-      for (const { sessionId } of this.#companionConversations()) publishStickerGuidance(sessionId);
+      for (const { sessionId, address } of this.#companionConversations()) {
+        publishStickerGuidance(sessionId);
+        if (address) publishPeerGuidance(sessionId, address);
+      }
       channelLog('runtime', 'connected', { pollIntervalMs: this.#pollIntervalMs });
       this.#schedulePoll(0); return this.status;
     } catch (error) { channelLog('runtime', 'start failed', { error: String(error?.message ?? error).slice(0, 200) }); this.#status.ready = false; this.#status.connectionState = 'failed'; this.#status.error = this.#diagnostics.report(error, { operation: 'connection.restore', reuse: true, botId: this.#config?.botId, automatic: true }).publicError;
@@ -190,8 +196,7 @@ export class IMessageRuntime {
       // Expose the control surface on the bot so the bridge can run /companion.
       if (this.#client) {
         this.#client.companion = {
-          handle: async (text, { conversationKey } = {}) => {
-            if (conversationKey) this.#companion?.noteUserMessage?.(conversationKey);
+          handle: async (text) => {
             const before = JSON.stringify(this.#companion?.config ?? null);
             const reply = await runCompanionCommand(text, this.#companion);
             const after = JSON.stringify(this.#companion?.config ?? null);
@@ -249,12 +254,31 @@ export class IMessageRuntime {
       for (const raw of messages) {
         const message = normalizeIMessage(raw, { botId: this.#config.platformId });
         if (message) {
-          this.#companion?.noteUserMessage?.(`direct:${message.conversationId}`);
-          // The sticker note is per Session: publish it the moment this chat is
-          // known to be an iMessage conversation.
-          const sessionId = this.#state.sessionFor?.(`direct:${message.conversationId}`);
-          if (sessionId) publishStickerGuidance(sessionId);
+          const conversationKey = `direct:${message.conversationId}`;
+          // A slash command is control traffic, not conversation: it must not
+          // restart the quiet-after-user clock, or a /companion status check
+          // silences her for another whole quiet window.
+          const hasImages = Array.isArray(message.images) && message.images.length > 0;
+          const isControlTraffic = COMPANION_COMMAND.test(message.content ?? '')
+            || isSharedLocalCommand(message.content ?? '', { hasImages });
+          if (!isControlTraffic) {
+            this.#companion?.noteUserMessage?.(conversationKey);
+          }
+          // The sticker and peer notes are per Session: publish them the moment
+          // this chat is known to be an iMessage conversation.
+          const sessionId = this.#state.sessionFor?.(conversationKey);
+          if (sessionId) {
+            publishStickerGuidance(sessionId);
+            publishPeerGuidance(sessionId, message.senderId);
+          }
           await this.#bridge.accept(message);
+          // A first message may have just created the binding: the notes above
+          // missed this turn, so publish them now for the next one.
+          const boundSessionId = this.#state.sessionFor?.(conversationKey);
+          if (boundSessionId && boundSessionId !== sessionId) {
+            publishStickerGuidance(boundSessionId);
+            publishPeerGuidance(boundSessionId, message.senderId);
+          }
           accepted += 1;
         }
         if (Number.isSafeInteger(raw.rowid)) await this.#state.setCursor(raw.rowid);

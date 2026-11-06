@@ -186,9 +186,11 @@ export class CompanionController {
       const decision = evaluateWake({
         now, config: this.#config, mood: entry.mood, counters: entry.counters,
         lastUserAt: entry.lastUserAt,
-        // A forced run from `/companion now` skips the probabilistic gates but
-        // still respects the switch, deep quiet and the daily cap.
+        // A forced run from `/companion now` skips the probabilistic gates and
+        // the quiet window but still respects the switch, deep quiet and the
+        // daily cap.
         random: forced ? () => 0 : this.#options.random,
+        forced,
       });
       this.#lastDecision = { at: now.toISOString(), ...decision };
       if (!decision.allowed) {

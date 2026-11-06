@@ -272,3 +272,23 @@ test('deep night plus an ignored streak still caps at the night maximum', () => 
   });
   assert.equal(delay, config.nightIntervalMaxMs);
 });
+
+// `/companion now` is the operator explicitly asking for her: the quiet window
+// exists so she does not butt in uninvited, not to refuse a direct request.
+test('a forced wake ignores the quiet window; a natural one still respects it', () => {
+  const config = normalizeCompanionConfig({ enabled: true });
+  const now = at(15, 0);
+  const justTalked = { lastUserAt: at(14, 58).getTime() };
+  assert.equal(evaluateWake({
+    now, config, mood: createMood(), counters: emptyDailyCounters(now), ...justTalked,
+  }).reason, 'quiet-after-user');
+  assert.equal(evaluateWake({
+    now, config, mood: createMood(), counters: emptyDailyCounters(now), ...justTalked, forced: true,
+  }).allowed, true);
+  // Deep quiet still wins even when forced: those hours are configured as
+  // must-not-be-woken, and a forced run can land inside them by clock drift.
+  const deep = normalizeCompanionConfig({ enabled: true, deepQuiet: true });
+  assert.equal(evaluateWake({
+    now: at(3, 0), config: deep, mood: createMood(), counters: emptyDailyCounters(at(3, 0)), forced: true,
+  }).reason, 'deep-quiet');
+});

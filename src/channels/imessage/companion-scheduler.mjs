@@ -172,6 +172,7 @@ function rollCounters(counters, now) {
  */
 export function evaluateWake({
   now, config = COMPANION_DEFAULTS, mood, counters, lastUserAt = null, random = Math.random,
+  forced = false,
 } = {}) {
   const date = now instanceof Date ? now : new Date(now);
   if (config.enabled !== true) return { allowed: false, reason: 'disabled' };
@@ -188,7 +189,9 @@ export function evaluateWake({
   const used = night ? rolled.night : rolled.day;
   if (used >= cap) return { allowed: false, reason: 'daily-cap' };
   if (typeof lastUserAt === 'number' && lastUserAt > 0) {
-    const quiet = pickQuietDelay({ config, random });
+    // A forced wake (`/companion now`) is the operator explicitly asking for
+    // her now; the quiet window exists so she does not butt in uninvited.
+    const quiet = forced ? 0 : pickQuietDelay({ config, random });
     if (date.getTime() - lastUserAt < quiet) return { allowed: false, reason: 'quiet-after-user' };
   }
   return { allowed: true, reason: 'ok', night };

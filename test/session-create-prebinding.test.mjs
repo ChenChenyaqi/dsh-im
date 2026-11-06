@@ -52,6 +52,25 @@ test('a Harness that cannot choose the id keeps the old order', async () => {
   assert.equal(state.sessionFor('direct:chat'), 'generated-session');
 });
 
+test('a directory switch that clears the planned binding cannot orphan the session', async () => {
+  const state = memoryState();
+  const harness = {
+    canChooseSessionId: true,
+    createSession: async (options) => {
+      // A first-time conversation-directory switch clears the in-flight
+      // binding while the Session is being created.
+      await state.clearSession('direct:chat');
+      return options.sessionId;
+    },
+    ask: async () => 'answer',
+    sessionExists: async () => true,
+    conversationWorkspaceGeneration: () => null,
+  };
+  await askInWorkspaceSession({ harness, state, key: 'direct:chat', text: 'hello' });
+  const created = state.sessionFor('direct:chat');
+  assert.match(created ?? '', /^session-[0-9a-f-]{36}$/u, 'the created session stays bound');
+});
+
 test('a failed creation leaves the previous binding untouched', async () => {
   const state = memoryState();
   await state.setSession('direct:chat', 'old-session');

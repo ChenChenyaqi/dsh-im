@@ -159,11 +159,11 @@ export async function askInWorkspaceSession({
             throw error;
           }
           diagnostic.sessionId = sessionId;
-          if (plannedSessionId === null) {
-            if (await state.setSession(key, sessionId) === false) return null;
-          } else if (sessionId !== plannedSessionId && await state.setSession(key, sessionId) === false) {
-            return null;
-          }
+          // A first-time conversation-directory switch clears the in-flight
+          // planned binding while this Session is being created. Re-assert the
+          // binding unconditionally so the Session that just processed this
+          // message can never end up orphaned.
+          if (await state.setSession(key, sessionId) === false) return null;
           // Binding committed: capture the conversation's effective-workspace
           // generation together with the session, so the prompt below is fenced
           // against a conversation switch that only commits after the bind.

@@ -77,25 +77,43 @@ export function mergeAttachmentRows(rows) {
   if (!Array.isArray(rows)) return [];
   const ordered = [];
   const byRowid = new Map();
+  const sourceOf = (row, prefix) => {
+    const path = row?.[`${prefix}Path`];
+    return typeof path === 'string' && path
+      ? {
+        path,
+        mediaType: row[`${prefix}Mime`] ?? null,
+        name: row[`${prefix}Name`] ?? null,
+        ...(Number.isFinite(Number(row[`${prefix}Bytes`])) ? { size: Number(row[`${prefix}Bytes`]) } : {}),
+      }
+      : null;
+  };
   for (const row of rows) {
     const rowid = row?.rowid;
-    const attachment = typeof row?.attachmentPath === 'string' && row.attachmentPath
-      ? {
-        path: row.attachmentPath,
-        mediaType: row.attachmentMime ?? null,
-        name: row.attachmentName ?? null,
-        ...(Number.isFinite(Number(row.attachmentBytes)) ? { size: Number(row.attachmentBytes) } : {}),
-      } : null;
+    // The quoted-message join multiplies the fan-out of the message's own
+    // attachments, so collect by path instead of trusting one row per file.
+    const attachment = sourceOf(row, 'attachment');
+    const quotedAttachment = sourceOf(row, 'quotedAttachment');
     const existing = byRowid.get(rowid);
     if (existing) {
-      if (attachment) existing.attachments.push(attachment);
+      if (attachment && !existing.attachments.some((item) => item.path === attachment.path)) {
+        existing.attachments.push(attachment);
+      }
+      if (quotedAttachment && !existing.quotedAttachments.some((item) => item.path === quotedAttachment.path)) {
+        existing.quotedAttachments.push(quotedAttachment);
+      }
       continue;
     }
     const entry = { ...row, attachments: attachment ? [attachment] : [] };
+    if (quotedAttachment) entry.quotedAttachments = [quotedAttachment];
     delete entry.attachmentPath;
     delete entry.attachmentMime;
     delete entry.attachmentName;
     delete entry.attachmentBytes;
+    delete entry.quotedAttachmentPath;
+    delete entry.quotedAttachmentMime;
+    delete entry.quotedAttachmentName;
+    delete entry.quotedAttachmentBytes;
     byRowid.set(rowid, entry);
     ordered.push(entry);
   }

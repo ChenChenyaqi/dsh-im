@@ -316,6 +316,22 @@ test('mergeAttachmentRows collapses join fan-out per message', () => {
   assert.deepEqual(mergeAttachmentRows(null), []);
 });
 
+test('mergeAttachmentRows collects quoted attachments and survives join multiplication', () => {
+  const base = { rowid: 9, guid: 'g9', text: '看这张', sender: '+15550001', chatGuid: 'c' };
+  // One own attachment times two quoted attachments = two SQL rows carrying
+  // both joins; neither side may duplicate or drop a file.
+  const merged = mergeAttachmentRows([
+    { ...base, attachmentPath: '~/own.png', attachmentMime: 'image/png', attachmentName: 'own.png', attachmentBytes: 1,
+      quotedAttachmentPath: '~/q1.png', quotedAttachmentMime: 'image/png', quotedAttachmentName: 'q1.png', quotedAttachmentBytes: 2 },
+    { ...base, attachmentPath: '~/own.png', attachmentMime: 'image/png', attachmentName: 'own.png', attachmentBytes: 1,
+      quotedAttachmentPath: '~/q2.png', quotedAttachmentMime: 'image/png', quotedAttachmentName: 'q2.png', quotedAttachmentBytes: 3 },
+  ]);
+  assert.equal(merged.length, 1);
+  assert.deepEqual(merged[0].attachments.map((item) => item.name), ['own.png']);
+  assert.deepEqual(merged[0].quotedAttachments.map((item) => item.name), ['q1.png', 'q2.png']);
+  assert.equal(merged[0].quotedAttachmentPath, undefined);
+});
+
 test('listMessages excludes stickers and unfinished transfers, keeps image rows', async (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());

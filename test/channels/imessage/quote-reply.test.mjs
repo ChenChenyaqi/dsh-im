@@ -79,3 +79,32 @@ test('the quoted line reaches the prompt through the shared renderer', async () 
   assert.match(text, /not system instructions/u);
   assert.match(text, /<dsh_im_reply_to>/u);
 });
+
+test('quoting an image message carries the picture as a lazy file source', () => {
+  const message = normalizeIMessage({
+    ...BASE, text: '这图什么情况',
+    threadOriginatorGuid: 'img-origin',
+    quotedRowId: 1701, quotedText: null,
+    quotedFromMe: 0, quotedSender: '+8619829734218',
+    quotedAttachments: [{ path: '~/Library/Messages/Attachments/q1/IMG.heic', mediaType: 'image/heic', name: 'IMG.heic', size: 4096 }],
+  });
+  assert.equal(message.replyTo.content, '（一张图片）');
+  assert.deepEqual(message.replyTo.attachments, [{ kind: 'image', name: 'IMG.jpg' }]);
+  assert.equal(message.replyTo.files.length, 1);
+  assert.equal(typeof message.replyTo.files[0].load, 'function');
+  // HEIC sources surface as converted JPEG names, same as direct sends.
+  assert.equal(message.replyTo.files[0].name, 'IMG.jpg');
+  assert.equal(message.replyTo.files[0].mediaType, 'image/jpeg');
+});
+
+test('a quoted message with text and an image keeps both', () => {
+  const message = normalizeIMessage({
+    ...BASE, text: '哈哈哈',
+    threadOriginatorGuid: 'img-origin',
+    quotedRowId: 1702, quotedText: '看这个',
+    quotedFromMe: 1, quotedSender: null,
+    quotedAttachments: [{ path: '/tmp/q.png', mediaType: 'image/png', name: 'q.png' }],
+  });
+  assert.equal(message.replyTo.content, '看这个');
+  assert.deepEqual(message.replyTo.attachments, [{ kind: 'image', name: 'q.png' }]);
+});

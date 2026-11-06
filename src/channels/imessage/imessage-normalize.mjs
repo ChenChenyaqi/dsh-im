@@ -35,11 +35,20 @@ function quotedReplyTo(value) {
     // Her own earlier line: persona-neutral so the plugin never assumes a name.
     ? '机器人'
     : cleanString(value.quotedSender);
+  // A quoted image rides along as a lazy file source (HEIC converts to JPEG on
+  // load), so she actually receives the picture instead of a placeholder.
+  const quotedImages = imessageImageSources(value.quotedAttachments ?? []);
   return {
     messageId: originator,
     ...(author ? { authorName: author } : {}),
-    // An image-only quote still tells her what kind of thing was pointed at.
-    content: quotedText ?? '（图片或贴纸消息）',
+    ...(quotedImages.length > 0 ? {
+      content: quotedText ?? '（一张图片）',
+      attachments: quotedImages.map((source) => ({ kind: 'image', name: source.name })),
+      files: quotedImages,
+    } : {
+      // An image-only quote still tells her what kind of thing was pointed at.
+      content: quotedText ?? '（图片或贴纸消息）',
+    }),
   };
 }
 

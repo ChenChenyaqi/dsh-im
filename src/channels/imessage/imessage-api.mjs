@@ -99,6 +99,8 @@ export class MacOSMessagesApi {
       q.ROWID AS quotedRowId, q.text AS quotedText,
       hex(q.attributedBody) AS quotedAttributedBodyHex,
       q.is_from_me AS quotedFromMe, qh.id AS quotedSender,
+      qa.filename AS quotedAttachmentPath, qa.mime_type AS quotedAttachmentMime,
+      qa.transfer_name AS quotedAttachmentName, qa.total_bytes AS quotedAttachmentBytes,
       datetime((m.date / 1000000000) + 978307200, 'unixepoch') AS receivedAt
       FROM message m
       JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
@@ -106,6 +108,9 @@ export class MacOSMessagesApi {
       LEFT JOIN handle h ON h.ROWID = m.handle_id
       LEFT JOIN message q ON q.guid = m.thread_originator_guid
       LEFT JOIN handle qh ON qh.ROWID = q.handle_id
+      LEFT JOIN message_attachment_join qmaj ON qmaj.message_id = q.ROWID
+      LEFT JOIN attachment qa ON qa.ROWID = qmaj.attachment_id
+        AND qa.is_sticker = 0 AND qa.transfer_state = 5 AND qa.filename IS NOT NULL
       LEFT JOIN message_attachment_join maj ON maj.message_id = m.ROWID
       LEFT JOIN attachment a ON a.ROWID = maj.attachment_id
         AND a.is_sticker = 0 AND a.transfer_state = 5 AND a.filename IS NOT NULL

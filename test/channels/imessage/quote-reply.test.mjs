@@ -80,7 +80,7 @@ test('the quoted line reaches the prompt through the shared renderer', async () 
   assert.match(text, /<dsh_im_reply_to>/u);
 });
 
-test('quoting an image message carries the picture as a lazy file source', () => {
+test('quoting an image points at the Messages copy instead of staging one', () => {
   const message = normalizeIMessage({
     ...BASE, text: '这图什么情况',
     threadOriginatorGuid: 'img-origin',
@@ -88,13 +88,13 @@ test('quoting an image message carries the picture as a lazy file source', () =>
     quotedFromMe: 0, quotedSender: '+8619829734218',
     quotedAttachments: [{ path: '~/Library/Messages/Attachments/q1/IMG.heic', mediaType: 'image/heic', name: 'IMG.heic', size: 4096 }],
   });
-  assert.equal(message.replyTo.content, '（一张图片）');
-  assert.deepEqual(message.replyTo.attachments, [{ kind: 'image', name: 'IMG.jpg' }]);
-  assert.equal(message.replyTo.files.length, 1);
-  assert.equal(typeof message.replyTo.files[0].load, 'function');
-  // HEIC sources surface as converted JPEG names, same as direct sends.
-  assert.equal(message.replyTo.files[0].name, 'IMG.jpg');
-  assert.equal(message.replyTo.files[0].mediaType, 'image/jpeg');
+  // No lazy file sources: nothing lands in .dsh-im/inbound for a quote.
+  assert.equal(message.replyTo.files, undefined);
+  assert.deepEqual(message.replyTo.attachments, [{ kind: 'image', name: 'IMG.heic' }]);
+  // She gets the permanent Messages path, ~ expanded, with a HEIC hint.
+  assert.match(message.replyTo.content, /\/Library\/Messages\/Attachments\/q1\/IMG\.heic/u);
+  assert.doesNotMatch(message.replyTo.content, /~\//u);
+  assert.match(message.replyTo.content, /HEIC/u);
 });
 
 test('a quoted message with text and an image keeps both', () => {
@@ -105,6 +105,7 @@ test('a quoted message with text and an image keeps both', () => {
     quotedFromMe: 1, quotedSender: null,
     quotedAttachments: [{ path: '/tmp/q.png', mediaType: 'image/png', name: 'q.png' }],
   });
-  assert.equal(message.replyTo.content, '看这个');
+  assert.match(message.replyTo.content, /^看这个\n（图片可直接读取：\/tmp\/q\.png）/u);
   assert.deepEqual(message.replyTo.attachments, [{ kind: 'image', name: 'q.png' }]);
+  assert.equal(message.replyTo.files, undefined);
 });

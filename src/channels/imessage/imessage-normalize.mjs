@@ -5,6 +5,7 @@
 import { cleanString, normalizeChatGuid } from './osascript-helpers.mjs';
 import { decodeAttributedBodyText, OBJECT_REPLACEMENT_CHARACTER } from './imessage-decode.mjs';
 import { imessageImageSources } from './imessage-attachments.mjs';
+import { homedir } from 'node:os';
 import { channelLog } from './channel-log.mjs';
 
 // Self-chat has no separate bot sender. Keep the reply marker in Messages itself
@@ -35,20 +36,29 @@ function quotedReplyTo(value) {
     // Her own earlier line: persona-neutral so the plugin never assumes a name.
     ? '机器人'
     : cleanString(value.quotedSender);
-  // A quoted image rides along as a lazy file source (HEIC converts to JPEG on
-  // load), so she actually receives the picture instead of a placeholder.
-  const quotedImages = imessageImageSources(value.quotedAttachments ?? []);
+  // A quoted image is never staged into the workspace again: Messages keeps a
+  // permanent copy in ~/Library/Messages/Attachments for either side of the
+  // chat, and she has full-disk read, so the path alone reaches the picture.
+  const quotedImage = Array.isArray(value.quotedAttachments)
+    ? value.quotedAttachments.find(
+      (item) => typeof item?.mediaType === 'string' && item.mediaType.toLowerCase().startsWith('image/')
+        && typeof item?.path === 'string' && item.path,
+    )
+    : null;
+  let content = quotedText ?? '（图片或贴纸消息）';
+  if (quotedImage) {
+    const absolutePath = quotedImage.path.replace(/^~(?=\/|$)/, homedir());
+    const heicNote = /\.hei[cf]$/iu.test(quotedImage.path)
+      ? '；HEIC 需先用 sips 转成 JPEG 再看'
+      : '';
+    const hint = `（图片可直接读取：${absolutePath}${heicNote}）`;
+    content = quotedText ? `${quotedText}\n${hint}` : hint;
+  }
   return {
     messageId: originator,
     ...(author ? { authorName: author } : {}),
-    ...(quotedImages.length > 0 ? {
-      content: quotedText ?? '（一张图片）',
-      attachments: quotedImages.map((source) => ({ kind: 'image', name: source.name })),
-      files: quotedImages,
-    } : {
-      // An image-only quote still tells her what kind of thing was pointed at.
-      content: quotedText ?? '（图片或贴纸消息）',
-    }),
+    ...(quotedImage?.name ? { attachments: [{ kind: 'image', name: quotedImage.name }] } : {}),
+    content,
   };
 }
 

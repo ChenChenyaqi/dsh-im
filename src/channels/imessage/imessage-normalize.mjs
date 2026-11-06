@@ -15,6 +15,34 @@ export function normalizeIMessageTarget(value) {
   return normalizeChatGuid(value);
 }
 
+/**
+ * The reply reference for a threaded quote (Messages' reply-to-specific-
+ * message). `thread_originator_guid` points at the quoted row; the API query
+ * joins its text and author so normalization stays synchronous. Tapbacks live
+ * in the `associated_message_*` columns instead and stay out of the bot by
+ * design.
+ */
+function quotedReplyTo(value) {
+  const originator = cleanString(value.threadOriginatorGuid);
+  if (!originator) return null;
+  // The quoted row can be pruned or older than the copy on this Mac.
+  if (value.quotedRowId === null || value.quotedRowId === undefined) {
+    return { messageId: originator, unavailableReason: 'not-found' };
+  }
+  const quotedText = cleanString(value.quotedText)
+    ?? decodeAttributedBodyText(value.quotedAttributedBodyHex ?? value.quotedAttributedBody);
+  const author = value.quotedFromMe === 1 || value.quotedFromMe === '1'
+    // Her own earlier line: persona-neutral so the plugin never assumes a name.
+    ? '机器人'
+    : cleanString(value.quotedSender);
+  return {
+    messageId: originator,
+    ...(author ? { authorName: author } : {}),
+    // An image-only quote still tells her what kind of thing was pointed at.
+    content: quotedText ?? '（图片或贴纸消息）',
+  };
+}
+
 export function normalizeIMessage(value, { botId } = {}) {
   if (!value || typeof value !== 'object') return null;
   if (value.serviceName !== undefined && value.serviceName !== 'iMessage') {
@@ -57,7 +85,9 @@ export function normalizeIMessage(value, { botId } = {}) {
     channelLog('normalize', 'skip', { rowid: value.rowid, reason: 'self' });
     return null;
   }
-  channelLog('normalize', 'accept', { rowid: value.rowid, sender, text: text?.slice(0, 50) ?? null, images: images.length });
+  const replyTo = quotedReplyTo(value);
+  channelLog('normalize', 'accept', { rowid: value.rowid, sender, text: text?.slice(0, 50) ?? null, images: images.length,
+    ...(replyTo ? { quoted: true } : {}) });
   return Object.freeze({
     messageId: guid,
     providerMessageId: guid,
@@ -67,6 +97,7 @@ export function normalizeIMessage(value, { botId } = {}) {
     senderName: sender,
     content: text ?? (images.length > 0 ? '看这个' : ''),
     images,
+    ...(replyTo ? { replyTo } : {}),
     addressed: true,
     replyTarget: { chatGuid, address: sender, serviceName: 'iMessage' },
     connectionTestTarget: { chatGuid, address: sender, serviceName: 'iMessage' },

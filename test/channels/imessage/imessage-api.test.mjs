@@ -141,7 +141,8 @@ test('self-chat accepts the owner once, ignores bot echoes and outgoing messages
   t.after(() => db.close());
   db.exec(`
     CREATE TABLE message (guid TEXT, text TEXT, handle_id INTEGER, date INTEGER,
-      is_from_me INTEGER, destination_caller_id TEXT, attributedBody BLOB);
+      is_from_me INTEGER, destination_caller_id TEXT, attributedBody BLOB,
+      thread_originator_guid TEXT);
     CREATE TABLE chat (guid TEXT, service_name TEXT, style INTEGER,
       chat_identifier TEXT, account_login TEXT, last_addressed_handle TEXT);
     CREATE TABLE chat_message_join (message_id INTEGER, chat_id INTEGER);
@@ -196,7 +197,7 @@ test('reads macOS 26 rows whose body only lives in attributedBody', async (t) =>
   t.after(() => db.close());
   db.exec(`
     CREATE TABLE message (guid TEXT, text TEXT, attributedBody BLOB, handle_id INTEGER,
-      date INTEGER, is_from_me INTEGER);
+      date INTEGER, is_from_me INTEGER, thread_originator_guid TEXT);
     CREATE TABLE chat (guid TEXT, service_name TEXT);
     CREATE TABLE chat_message_join (message_id INTEGER, chat_id INTEGER);
     CREATE TABLE handle (id TEXT);
@@ -320,7 +321,7 @@ test('listMessages excludes stickers and unfinished transfers, keeps image rows'
   t.after(() => db.close());
   db.exec(`
     CREATE TABLE message (guid TEXT, text TEXT, attributedBody BLOB, handle_id INTEGER,
-      date INTEGER, is_from_me INTEGER);
+      date INTEGER, is_from_me INTEGER, thread_originator_guid TEXT);
     CREATE TABLE chat (guid TEXT, service_name TEXT);
     CREATE TABLE chat_message_join (message_id INTEGER, chat_id INTEGER);
     CREATE TABLE handle (id TEXT);

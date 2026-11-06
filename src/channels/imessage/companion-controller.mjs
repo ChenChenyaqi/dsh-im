@@ -186,9 +186,8 @@ export class CompanionController {
       const decision = evaluateWake({
         now, config: this.#config, mood: entry.mood, counters: entry.counters,
         lastUserAt: entry.lastUserAt,
-        // A forced run from `/companion now` skips the probabilistic gates and
-        // the quiet window but still respects the switch, deep quiet and the
-        // daily cap.
+        // A forced run from `/companion now` is an explicit request: it skips
+        // every gate except the master switch.
         random: forced ? () => 0 : this.#options.random,
         forced,
       });
@@ -223,12 +222,12 @@ export class CompanionController {
         if (!forced) this.#arm();
         return { delivered: false, reason: 'ask-failed' };
       }
-      const counters = recordWake(entry.counters, now, { night: decision.night === true });
       if (isSkipReply(reply)) {
         channelLog('companion', 'she stayed silent', { motive: motive.id });
-        persisted.conversations[target.conversationKey] = {
-          ...entry, counters, lastWakeAt: now.getTime(),
-        };
+        persisted.conversations[target.conversationKey] = entryAfterWake(entry, {
+          at: now, forced, skipped: true, night: decision.night === true,
+          decay: this.#config.decay,
+        });
         this.#commit(persisted);
         if (!forced) this.#arm();
         return { delivered: false, reason: 'skipped' };
@@ -240,16 +239,9 @@ export class CompanionController {
         if (!forced) this.#arm();
         return { delivered: false, reason: 'deliver-failed' };
       }
-      persisted.conversations[target.conversationKey] = {
-        ...entry,
-        counters,
-        lastWakeAt: now.getTime(),
-        lastDeliveredAt: now.getTime(),
-        // She spoke and the user has not answered yet: a later silence weakens
-        // the next reach-out.
-        pendingSince: now.getTime(),
-        mood: nextMood(entry.mood, 'ignored', { decay: this.#config.decay }),
-      };
+      persisted.conversations[target.conversationKey] = entryAfterWake(entry, {
+        at: now, forced, night: decision.night === true, decay: this.#config.decay,
+      });
       this.#commit(persisted);
       channelLog('companion', 'delivered', { motive: motive.id, chars: reply.length });
       if (!forced) this.#arm();
@@ -283,6 +275,31 @@ export class CompanionController {
       config: this.#config,
     };
   }
+}
+
+/**
+ * The conversation entry after one wake completed. Pure so both outcomes are
+ * unit-testable without driving the real timer: a natural wake spends budget
+ * and marks a pending reply, a forced wake (`/companion now`) is a manual
+ * action and changes no rhythm state at all.
+ */
+export function entryAfterWake(entry, { at, forced = false, skipped = false, night = false, decay = true }) {
+  const date = at instanceof Date ? at : new Date(at);
+  const counters = forced ? (entry.counters ?? null)
+    : recordWake(entry.counters, date, { night });
+  const base = { ...entry, counters, lastWakeAt: date.getTime() };
+  if (skipped) return base;
+  return {
+    ...base,
+    lastDeliveredAt: date.getTime(),
+    ...(forced ? {} : {
+      // She spoke unprompted and the user has not answered yet: a later
+      // silence weakens the next reach-out. A forced poke skips this: it was
+      // requested, so silence after it is not her being cold-shouldered.
+      pendingSince: date.getTime(),
+      mood: nextMood(entry.mood, 'ignored', { decay }),
+    }),
+  };
 }
 
 /** Plain text of a Harness answer, ignoring reasoning parts. */

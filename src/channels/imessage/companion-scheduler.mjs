@@ -176,7 +176,9 @@ export function evaluateWake({
 } = {}) {
   const date = now instanceof Date ? now : new Date(now);
   if (config.enabled !== true) return { allowed: false, reason: 'disabled' };
-  if (isDeepQuiet(date, config)) return { allowed: false, reason: 'deep-quiet' };
+  // A forced wake (`/companion now`) is the operator's explicit request: it
+  // ignores deep quiet and the daily cap too. Only the master switch gates it.
+  if (!forced && isDeepQuiet(date, config)) return { allowed: false, reason: 'deep-quiet' };
   const current = normalizeMood(mood);
   if (current.consecutiveIgnored >= 4) {
     // Even a long cold streak keeps a floor: she still checks in, rarely.
@@ -185,9 +187,11 @@ export function evaluateWake({
   }
   const rolled = rollCounters(counters, date);
   const night = isNight(date, config);
-  const cap = night ? config.nightCap : config.dayCap;
-  const used = night ? rolled.night : rolled.day;
-  if (used >= cap) return { allowed: false, reason: 'daily-cap' };
+  if (!forced) {
+    const cap = night ? config.nightCap : config.dayCap;
+    const used = night ? rolled.night : rolled.day;
+    if (used >= cap) return { allowed: false, reason: 'daily-cap' };
+  }
   if (typeof lastUserAt === 'number' && lastUserAt > 0) {
     // A forced wake (`/companion now`) is the operator explicitly asking for
     // her now; the quiet window exists so she does not butt in uninvited.

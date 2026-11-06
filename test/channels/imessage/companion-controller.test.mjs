@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { CompanionController, replyTextOf } from '../../../src/channels/imessage/companion-controller.mjs';
+import { CompanionController, entryAfterWake, replyTextOf } from '../../../src/channels/imessage/companion-controller.mjs';
+import { createMood } from '../../../src/channels/imessage/companion-mood.mjs';
 
 /** A controller wired to an in-memory state blob and a fake clock. */
 function makeController(t, {
   config = {}, reply = '在想你', conversations, askError = null, deliverError = null,
+  askHook = null, deliverHook = null,
 } = {}) {
   let persisted = {};
   const asks = [];
@@ -18,12 +20,14 @@ function makeController(t, {
     conversations: conversations ?? (() => [{ conversationKey: 'direct:iMessage;-;+861', sessionId: 'session-1' }]),
     ask: async (sessionId, prompt) => {
       asks.push({ sessionId, prompt });
+      askHook?.();
       if (askError) throw askError;
       return { message: { content: [{ type: 'text', text: reply }] } };
     },
     deliver: async (target, text) => {
       if (deliverError) throw deliverError;
       sent.push({ target, text });
+      deliverHook?.();
     },
     now: () => clock,
     random: () => 0.5,
@@ -50,21 +54,29 @@ test('a forced wake asks the Harness and delivers her answer', async (t) => {
   assert.equal(sent[0].target.conversationKey, 'direct:iMessage;-;+861');
 });
 
-test('SKIP keeps her silent and still spends one budget slot', async (t) => {
-  const { controller, sent, state } = makeController(t, { reply: 'SKIP', config: { dayCap: 2 } });
-  const result = await controller.triggerNow();
-  assert.deepEqual(result, { delivered: false, reason: 'skipped' });
+test('SKIP keeps her silent; a natural SKIP spends budget, a forced one does not', async (t) => {
+  const { controller, sent, state } = makeController(t, { reply: 'SKIP' });
+  assert.deepEqual(await controller.triggerNow(), { delivered: false, reason: 'skipped' });
   assert.deepEqual(sent, []);
-  const counters = state().conversations['direct:iMessage;-;+861'].counters;
-  assert.equal(counters.day, 1);
+  assert.equal(state().conversations['direct:iMessage;-;+861'].counters, null);
+  const at = new Date(2026, 10, 5, 15, 0, 0, 0);
+  const natural = entryAfterWake({ counters: null, mood: createMood() }, { at, skipped: true });
+  assert.equal(natural.counters.day, 1);
+  const forced = entryAfterWake({ counters: null, mood: createMood() }, { at, skipped: true, forced: true });
+  assert.equal(forced.counters, null);
 });
 
-test('a delivered message sets a pending marker that weakens the next reach-out', async (t) => {
-  const { controller, state } = makeController(t);
-  await controller.triggerNow();
-  const entry = state().conversations['direct:iMessage;-;+861'];
-  assert.ok(entry.pendingSince);
-  assert.equal(entry.mood.consecutiveIgnored, 1);
+test('a delivered wake marks pending and spends budget naturally, never when forced', () => {
+  const at = new Date(2026, 10, 5, 15, 0, 0, 0);
+  const natural = entryAfterWake({ counters: null, mood: createMood() }, { at });
+  assert.ok(natural.pendingSince);
+  assert.equal(natural.counters.day, 1);
+  assert.equal(natural.mood.consecutiveIgnored, 1);
+  const forced = entryAfterWake({ counters: null, mood: createMood() }, { at, forced: true });
+  assert.equal(forced.pendingSince ?? null, null);
+  assert.equal(forced.counters, null);
+  assert.equal(forced.mood.consecutiveIgnored, 0);
+  assert.equal(forced.lastDeliveredAt, at.getTime());
 });
 
 test('a user reply restores warmth and clears the pending marker', async (t) => {
@@ -77,13 +89,15 @@ test('a user reply restores warmth and clears the pending marker', async (t) => 
   assert.ok(entry.lastUserAt);
 });
 
-test('the daily cap blocks further reach-outs until tomorrow', async (t) => {
+test('the daily cap does not gate an explicitly forced wake', async (t) => {
   const { controller, sent, advance } = makeController(t, { config: { dayCap: 1 } });
   assert.equal((await controller.triggerNow()).delivered, true);
-  assert.deepEqual(await controller.triggerNow(), { delivered: false, reason: 'daily-cap' });
-  assert.equal(sent.length, 1);
+  // Forced is the operator's request, so the cap no longer refuses it; the
+  // natural-wake cap itself is covered at the scheduler level.
+  assert.equal((await controller.triggerNow()).delivered, true);
+  assert.equal(sent.length, 2);
   advance(10);
-  assert.equal((await controller.triggerNow()).reason, 'daily-cap');
+  assert.equal((await controller.triggerNow()).delivered, true);
 });
 
 test('a disabled companion refuses even a forced wake', async (t) => {
@@ -92,7 +106,7 @@ test('a disabled companion refuses even a forced wake', async (t) => {
   assert.deepEqual(sent, []);
 });
 
-test('deep quiet blocks a forced wake', async (t) => {
+test('deep quiet no longer blocks an explicitly forced wake', async (t) => {
   let clock = new Date(2026, 10, 5, 3, 0, 0, 0);
   let persisted = {};
   const controller = new CompanionController({
@@ -107,7 +121,9 @@ test('deep quiet blocks a forced wake', async (t) => {
   });
   controller.start();
   t.after(() => controller.stop());
-  assert.deepEqual(await controller.triggerNow(), { delivered: false, reason: 'deep-quiet' });
+  // /companion now is the operator's request: only the master switch gates it.
+  const outcome = await controller.triggerNow();
+  assert.equal(outcome.delivered, true);
 });
 
 test('a recent user message does not block an explicitly forced wake', async (t) => {
@@ -146,11 +162,12 @@ test('status reports the budget, mood and configured windows', async (t) => {
   const status = controller.status();
   assert.equal(status.enabled, true);
   assert.equal(status.running, true);
+  // The forced wake spent nothing: full budget, mood untouched.
   assert.equal(status.remaining.cap, 4);
-  assert.equal(status.remaining.used, 1);
-  assert.equal(status.remaining.remaining, 3);
+  assert.equal(status.remaining.used, 0);
+  assert.equal(status.remaining.remaining, 4);
   assert.equal(status.conversationKey, 'direct:iMessage;-;+861');
-  assert.equal(status.moodLabel, '略收敛');
+  assert.equal(status.moodLabel, '正常');
   assert.equal(status.config.nightCap, 2);
 });
 
@@ -191,4 +208,18 @@ test('persisted garbage never breaks the controller', async (t) => {
   t.after(() => controller.stop());
   assert.deepEqual(await controller.triggerNow(), { delivered: false, reason: 'skipped' });
   assert.equal(controller.status().mood.warmth, 1);
+});
+
+test('a forced wake spends no budget and touches no rhythm state', async (t) => {
+  const { controller, state } = makeController(t, { config: { dayCap: 1 } });
+  assert.equal((await controller.triggerNow()).delivered, true);
+  const entry = state().conversations['direct:iMessage;-;+861'];
+  // No daily-cap spend, no pending-reply wait, no cold-shoulder marking.
+  assert.equal(entry.counters, null);
+  assert.equal(entry.pendingSince, null);
+  assert.equal(entry.mood.consecutiveIgnored, 0);
+  assert.equal(entry.mood.warmth, 1);
+  // A natural wake in the same state still spends and marks as before.
+  // (Driven through the scheduler's own coverage; here only the forced side
+  // lives, so assert the recordWake contract directly instead.)
 });

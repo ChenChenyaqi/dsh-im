@@ -110,12 +110,16 @@ test('deep quiet blocks a forced wake', async (t) => {
   assert.deepEqual(await controller.triggerNow(), { delivered: false, reason: 'deep-quiet' });
 });
 
-test('a recent user message keeps her quiet', async (t) => {
+test('a recent user message does not block an explicitly forced wake', async (t) => {
   const { controller } = makeController(t, {
     config: { quietAfterUserMinMs: 60 * 60_000, quietAfterUserMaxMs: 60 * 60_000 },
   });
   controller.noteUserMessage('direct:iMessage;-;+861');
-  assert.deepEqual(await controller.triggerNow(), { delivered: false, reason: 'quiet-after-user' });
+  // triggerNow is the `/companion now` path: an explicit request ignores the
+  // quiet window. Natural wakes still respect it (companion-logic covers that
+  // at the scheduler level).
+  const outcome = await controller.triggerNow();
+  assert.equal(outcome.delivered, true);
 });
 
 test('a Harness failure is reported and does not spend budget', async (t) => {

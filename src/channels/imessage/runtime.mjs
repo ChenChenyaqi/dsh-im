@@ -17,6 +17,8 @@ import { publishPeerGuidance } from './imessage-peer.mjs';
 import { runCompanionCommand } from '../shared/companion-command.mjs';
 import { COMPANION_COMMAND } from '../shared/text-harness-bridge.mjs';
 import { isSharedLocalCommand } from '../shared/command-permission.mjs';
+import { deliverOutboundArtifacts } from '../shared/semantic/artifact-delivery.mjs';
+import { messageFailureText, setLastMessageFailure } from '../shared/message-failure.mjs';
 
 export { HUMAN_TYPING_DEFAULTS, computeHumanTypingDelayMs } from './typing-delays.mjs';
 export { splitIMessageReplyParts } from './reply-splitting.mjs';
@@ -94,7 +96,7 @@ export class IMessageRuntime {
   #diagnostics;
   #replyTimeoutMs; #pollIntervalMs; #createApi; #createClient; #status = createIMessageRuntimeStatus();
   #api; #client; #bridge; #abortController; #timer; #polling; #stopped = true;
-  #companion = null; #persistBotConfig = null;
+  #companion = null; #persistBotConfig = null; #companionArtifacts = [];
   constructor({ config, token, harness, state, contextEnhancement, accessPolicy, logger = console,
     replyTimeoutMs = 600_000, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     createApi = (options) => new MacOSMessagesApi(options),
@@ -185,10 +187,40 @@ export class IMessageRuntime {
           store.persist?.();
         },
         conversations: () => this.#companionConversations(),
-        ask: (sessionId, prompt) => this.#harness.ask(sessionId, prompt, { timeoutMs: this.#replyTimeoutMs }),
+        // The reach-out is an IM turn too: passing onArtifact opens the
+        // outbound-artifact consumer for it, so dsh_im_return_file queues a
+        // sticker instead of erroring mid-turn (which used to leave a bare
+        // markdown fallback and a repeated opening line).
+        ask: (sessionId, prompt) => {
+          this.#companionArtifacts = [];
+          return this.#harness.ask(sessionId, prompt, {
+            timeoutMs: this.#replyTimeoutMs,
+            onArtifact: (artifact) => this.#companionArtifacts.push(artifact),
+          });
+        },
         deliver: async (target, text) => {
           if (!this.#client) throw new Error('iMessage bot client is not connected');
           await this.#client.sendText({ chatGuid: target.chatGuid, address: target.address }, text);
+          const artifacts = this.#companionArtifacts;
+          this.#companionArtifacts = [];
+          if (artifacts.length === 0) return;
+          await deliverOutboundArtifacts({
+            artifacts,
+            deliveryId: `companion-${Date.now()}`,
+            channelKey: 'imessage',
+            signal: this.#abortController.signal,
+            sendImage: (file) => this.#client.sendImage(target, file),
+            sendFile: (file) => this.#client.sendFile(target, file),
+            onFailure: (artifact, error) => setLastMessageFailure(this.#status, error, {
+              userMessage: `「${String(artifact?.fileName ?? '文件').replace(/[\r\n]+/g, ' ').slice(0, 100)}」没发出去`,
+              reason: error?.code,
+            }),
+            sendFailureNotice: (_artifact, _error, failure) => this.#client.sendText(
+              { chatGuid: target.chatGuid, address: target.address },
+              messageFailureText(failure),
+            ),
+            logger: this.#logger,
+          });
         },
         logger: this.#logger,
       });

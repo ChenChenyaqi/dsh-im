@@ -5,16 +5,19 @@
 // returns as soon as the message is composed, while Messages ingests, copies
 // and uploads the attachment asynchronously. Deleting the file right after the
 // call raced that ingestion — a 3.2MB GIF lost the race twice and stayed
-// undelivered with transfer_state=0, no error, nothing on the phone. So files
-// land in a stable directory under the bot workspace and old ones are swept at
-// the next send, an hour later at the earliest.
+// undelivered with transfer_state=0, no error, nothing on the phone.
+//
+// The location must stay the user temp directory: ingestion runs in Messages'
+// helper daemon, which reads /var/folders but not arbitrary home paths — a
+// send staged under ~/.dsh landed in transfer_state=6 and never delivered.
+// Old files are swept at the next send, an hour later at the earliest.
 
-import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { channelLog } from './channel-log.mjs';
 
-const OUTBOUND_DIRECTORY = join(homedir(), '.dsh', 'im', '.dsh-im', 'outbound');
+const OUTBOUND_DIRECTORY = tmpdir();
 const OUTBOUND_PREFIX = 'dsh-im-out-';
 const OUTBOUND_RETENTION_MS = 60 * 60_000;
 
@@ -53,9 +56,8 @@ export async function sendOutboundArtifactBytes(api, target, file, { directory =
   const path = join(directory, `dsh-im-out-${process.pid}-${Date.now()}-${name}`);
   channelLog('outbound', 'stage', { name, bytes: bytes.length, to: target?.address ?? target?.chatGuid });
   try {
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-    // Sweeping here keeps the directory bounded without a timer; failures are
-    // cosmetic and never block the send.
+    // Sweeping here keeps the temp directory bounded without a timer; failures
+    // are cosmetic and never block the send.
     await sweepStaleOutboundFiles(directory).catch(() => undefined);
     await writeFile(path, bytes, { mode: 0o600 });
     await api.sendFile({

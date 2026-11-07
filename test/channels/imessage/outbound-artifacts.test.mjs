@@ -28,7 +28,7 @@ test('the staged file outlives the send call', async (t) => {
   // The race fix itself: the file Messages reads asynchronously still exists.
   const { statSync } = await import('node:fs');
   assert.ok(statSync(sentPaths[0]).size > 0, 'staged file must remain after send');
-  assert.match(sentPaths[0], /outbound/u);
+  assert.match(sentPaths[0], /dsh-im-out-/u);
 });
 
 test('a failed send still throws and still leaves the file', async (t) => {

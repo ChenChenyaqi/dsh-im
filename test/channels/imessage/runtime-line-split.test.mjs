@@ -141,11 +141,16 @@ test('sendImage and sendFile stage bytes to a temp file and forward the path', a
   assert.equal(sent[0].address, target.address);
   assert.ok(sent[0].path.includes('whale.png'));
   assert.ok(!sent[0].path.includes('..'));
-  const { access } = await import('node:fs/promises');
-  await assert.rejects(() => access(sent[0].path));  // temp file cleaned up
+  const { access, rm } = await import('node:fs/promises');
+  // The staged file outlives the send: Messages ingests attachments
+  // asynchronously, and deleting right here is what lost the race for large
+  // GIFs. A later sweep owns removal.
+  await access(sent[0].path);
   await bot.sendFile(target, { bytes: Buffer.from('XYZ'), fileName: 'doc.pdf' });
   assert.equal(sent.length, 2);
   assert.ok(sent[1].path.endsWith('doc.pdf'));
+  await access(sent[1].path);
+  await Promise.allSettled([rm(sent[0].path, { force: true }), rm(sent[1].path, { force: true })]);
 });
 
 test('sendImage rejects empty bytes', async () => {
